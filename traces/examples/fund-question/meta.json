@@ -1,0 +1,10 @@
+{
+  "conv_id": "20260805T225205Z-c32a28",
+  "operator": "SebasSoto",
+  "model": "qwen.qwen3-32b",
+  "profile": "default",
+  "region": "us-west-2",
+  "system_prompt_sha256": "194fe9d6387fe1beef54d79d42033192aad815fa93dc8c6af9eb6c575bd19f27",
+  "tool_schemas_sha256": "6dc9ad22395e0acaac2a8f0441cbf537f46556d1ef28d28d1773cfbb3bf1fdbc",
+  "world_db_sha256": "a39a6734d10ad9837e5200e0fd747590a52222eed7b30d2d7a0f1e997fc4b332"
+}

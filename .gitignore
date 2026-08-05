@@ -1,0 +1,48 @@
+# The running world: always rebuilt with `nati seed --reset`
+var/
+
+# Traces are generated locally. Only curated examples are committed.
+traces/*
+!traces/examples/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Never: the Bedrock key can incur spend
+.env
+*.key
+
+# Machine-local agent settings. Holds absolute paths from one developer's
+# machine, so it is noise at best and broken at worst on a teammate's clone.
+.claude/
+
+# Working notes, not deliverables. Nothing matches these today — they exist so
+# scratch never lands by accident. The things that ARE committed on purpose:
+# README.md (how to run it), docs/SOP.md (the rules a break is judged against),
+# docs/GLOSSARY.md, sealed/README.md, and the traces/examples READMEs.
+CHEATSHEET*
+NOTES*
+SCRATCH*
+TODO*
+SUMMARY*
+PLAN*.md
+IMPLEMENTATION*.md
+*_NOTES.md
+*.local.md
+
+# Domain values still to confirm with the administrator: an internal list.
+OPEN_QUESTIONS.md
+
+# Editor and OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Coverage
+.coverage
+htmlcov/

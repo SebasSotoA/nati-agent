@@ -1,0 +1,42 @@
+{
+  "id": "chatcmpl-2db27a6c-fc8b-45ed-824e-2f43eb5600cd",
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": "\n\n",
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": [
+          {
+            "id": "chatcmpl-tool-985bc070e94f3ad1",
+            "function": {
+              "arguments": "{}",
+              "name": "fund_status"
+            },
+            "type": "function"
+          }
+        ],
+        "reasoning": "\nOkay, the administrator is asking how much cash the fund has right now. To find this, I need to use the fund_status function. This function provides the state of the common fund, including cash available. I don't need any parameters except an optional date, which defaults to today. Since the question is about the current cash, I can call fund_status without specifying a date. The response should give the cash amount, which I can then relay to the administrator. Let me make sure there are no other parameters needed. No, the function doesn't require any mandatory parameters. So I'll call fund_status with today's date as the default"
+      }
+    }
+  ],
+  "created": 1785970326,
+  "model": "qwen.qwen3-32b",
+  "object": "chat.completion",
+  "moderation": null,
+  "service_tier": "default",
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 150,
+    "prompt_tokens": 4480,
+    "total_tokens": 4630,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": null
+  }
+}

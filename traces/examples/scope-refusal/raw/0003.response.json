@@ -1,0 +1,42 @@
+{
+  "id": "chatcmpl-4d2f6f1e-bf92-405e-9c79-aac577ee53a9",
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "logprobs": null,
+      "message": {
+        "content": "\n\n",
+        "refusal": null,
+        "role": "assistant",
+        "annotations": null,
+        "audio": null,
+        "function_call": null,
+        "tool_calls": [
+          {
+            "id": "chatcmpl-tool-a35f832bc9e05db9",
+            "function": {
+              "arguments": "{}",
+              "name": "fund_status"
+            },
+            "type": "function"
+          }
+        ],
+        "reasoning": "\nOkay, the user is asking about the current state of the fund. Let me recall the tools available. The 'fund_status' function provides the state of the common fund, including cash available, capital out on loan, equity, income, and distributable profits. It also gives details about the cycle, like the current year, end date, and raffle months.\n\nI need to call the 'fund_status' function without any parameters since it doesn't require any. The user wants to know what's in the fund right now, so the function should return all the necessary details. I'll make sure to use the correct tool and present the information once I get the response.\n"
+      }
+    }
+  ],
+  "created": 1785970339,
+  "model": "qwen.qwen3-32b",
+  "object": "chat.completion",
+  "moderation": null,
+  "service_tier": "default",
+  "system_fingerprint": null,
+  "usage": {
+    "completion_tokens": 156,
+    "prompt_tokens": 4866,
+    "total_tokens": 5022,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": null
+  }
+}

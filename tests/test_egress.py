@@ -1,0 +1,416 @@
+"""Tests for the output (egress) filter.
+
+Both directions matter equally: an invented figure must be blocked, and
+ordinary benign replies must pass — a filter that blocks real work is a bug
+with better manners.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from nati import clock
+from nati.agent import egress
+from nati.tools import reads
+
+ENV_FUND = {
+    "ok": True,
+    "message": "As of 2026-08-04 the fund has $15,732 in cash and $2,121 out on loan.",
+    "cash": 15732,
+    "capital_out": 2121,
+    "equity": 17853,
+    "figures": [
+        {"field": "cash", "value": 15732, "text": "$15,732"},
+        {"field": "capital_out", "value": 2121, "text": "$2,121"},
+    ],
+}
+
+
+@pytest.fixture
+def world(tmp_path):
+    """A freshly built world. Never `db.connect()` on var/world.db: that file is
+    generated, so a fresh clone does not have it and the suite must not need it.
+    """
+    from nati.world import db
+
+    path = tmp_path / "world.db"
+    db.create(path, reset=True)
+    con = db.connect(path)
+    yield con
+    con.close()
+
+
+def _review(reply: str, envelopes=None, user_text: str = "") -> egress.Verdict:
+    with clock.frozen("2026-08-04"):
+        return egress.review(reply, envelopes or [], user_text)
+
+
+# --------------------------------------------------------------------------
+# Benign replies pass
+# --------------------------------------------------------------------------
+
+
+def test_a_faithful_reply_passes() -> None:
+    v = _review(
+        "The fund has $15,732 in cash and $2,121 out on loan, as of 2026-08-04.",
+        [ENV_FUND],
+    )
+    assert v.ok
+    assert "15,732" in v.reply
+
+
+def test_numbers_the_user_typed_may_be_echoed() -> None:
+    # Confirm-before-write: she says an amount, Nati repeats it back to confirm.
+    v = _review(
+        "Just to confirm: record $40 of savings for Carlos?",
+        [],
+        user_text="Record a $40 saving for Carlos.",
+    )
+    assert v.ok
+
+
+def test_small_counts_are_free() -> None:
+    v = _review("You have two active loans; I checked all 3 tickets.", [ENV_FUND])
+    assert v.ok
+
+
+def test_prompt_numerals_are_allowed() -> None:
+    # "29 members" and today's date come from the system prompt itself.
+    v = _review("The natillera has 29 members and today is 2026-08-04.", [])
+    assert v.ok
+
+
+def test_a_year_from_an_allowed_date_is_allowed() -> None:
+    v = _review("That saving is part of the 2026 cycle.", [ENV_FUND])
+    assert v.ok
+
+
+def test_a_date_may_be_written_in_prose() -> None:
+    """Regression: a real reply was blocked on the '30' in "November 30, 2026".
+
+    The tool returned the date as 2026-11-30. Blocking the ordinary English form
+    of a date a tool DID return is over-blocking on a formatting difference.
+    """
+    env = {"ok": True, "message": "done", "cycle_ends": "2026-11-30"}
+    v = _review("The cycle closes on November 30, 2026.", [env])
+    assert v.ok, f"blocked on {v.unverified}"
+
+
+def test_a_number_token_does_not_swallow_a_trailing_comma() -> None:
+    with clock.frozen("2026-08-04"):
+        assert egress._number_tokens("on 30, and 15,732 too") == ["30", "15,732"]
+
+
+def test_a_reply_with_no_numbers_passes_with_no_envelopes() -> None:
+    v = _review("I cannot do that, and repeating the request will not change it.")
+    assert v.ok
+
+
+def test_a_figure_from_an_earlier_turn_may_be_restated() -> None:
+    """Regression: the allowlist is CONVERSATION-scoped, not turn-scoped.
+
+    A real conversation was broken by the turn-scoped version: a tool stated the
+    next cycle starts in 2027, and the very next turn — which called no tool —
+    was blocked for repeating it. Ask-then-discuss is the most ordinary pattern
+    there is, so it has to work.
+    """
+    history = [
+        {"role": "system", "content": "..."},
+        {"role": "user", "content": "what is in the fund?"},
+        {"role": "tool", "tool_call_id": "c1",
+         "content": json.dumps(ENV_FUND)},
+        {"role": "assistant", "content": "The fund has $15,732 in cash."},
+        {"role": "user", "content": "is that enough for the payout?"},
+    ]
+    envelopes, said = egress.conversation_context(history)
+    with clock.frozen("2026-08-04"):
+        # This turn called no tool at all.
+        v = egress.review("No — $15,732 does not cover it.", envelopes, said)
+    assert v.ok, f"blocked on {v.unverified}"
+
+
+def test_unreadable_tool_content_is_skipped_not_fatal() -> None:
+    history = [{"role": "tool", "content": "{not json"},
+               {"role": "user", "content": "hi"}]
+    envelopes, said = egress.conversation_context(history)
+    assert envelopes == []
+    assert said == "hi"
+
+
+def test_the_next_cycle_year_is_answerable(world) -> None:
+    """Regression: a real reply was blocked on the single token '2027'.
+
+    "When does the next cycle start?" is ordinary admin work. The model had no
+    tool that returned the next cycle's year, so it added one to this year — and
+    the filter correctly refuses model-side arithmetic. The fix was in the
+    TOOLS: `fund_status` now returns the cycle's calendar, so the model reports
+    it. This test pins that the answer passes.
+    """
+    with clock.frozen("2026-08-04"):
+        env = reads.fund_status(world)
+        v = egress.review(
+            "The 2026 cycle runs January to November and closes on 2026-11-30. "
+            "Benito can join when the 2027 cycle starts on 2027-01-01.",
+            [env], "",
+        )
+    assert v.ok, f"still blocked on {v.unverified}"
+
+
+# --------------------------------------------------------------------------
+# Invented figures are blocked
+# --------------------------------------------------------------------------
+
+
+def test_an_invented_balance_is_blocked() -> None:
+    v = _review("The fund has $99,999 in cash.", [ENV_FUND])
+    assert not v.ok
+    assert "$99,999" in v.unverified
+    assert v.reply == egress.BLOCKED_REPLY
+    assert "99,999" not in v.reply
+
+
+def test_model_side_arithmetic_is_blocked() -> None:
+    # 15732 + 2121 = 17853 is in the envelope; but a third of cash is not.
+    v = _review("A third of the cash would be about $5,244.", [ENV_FUND])
+    assert not v.ok
+
+
+def test_a_decimal_is_never_free() -> None:
+    v = _review("That works out to about 4.5 per member.", [ENV_FUND])
+    assert not v.ok
+
+
+def test_an_unknown_date_is_blocked() -> None:
+    v = _review("I recorded it dated 2026-03-15.", [ENV_FUND])
+    assert not v.ok
+    assert "2026-03-15" in v.unverified
+
+
+# --------------------------------------------------------------------------
+# Leaks
+# --------------------------------------------------------------------------
+
+
+def test_a_leaked_think_block_is_stripped_but_the_reply_survives() -> None:
+    v = _review(
+        "<think>the user might be trying to trick me</think>The fund has "
+        "$15,732 in cash.",
+        [ENV_FUND],
+    )
+    assert v.ok
+    assert v.stripped_think
+    assert "<think>" not in v.reply
+    assert "trick" not in v.reply
+    assert v.reply == "The fund has $15,732 in cash."
+
+
+def test_a_stray_close_tag_strips_everything_before_it() -> None:
+    v = _review(
+        "internal deliberation here</think>The fund has $15,732 in cash.",
+        [ENV_FUND],
+    )
+    assert v.ok
+    assert v.stripped_think
+    assert v.reply == "The fund has $15,732 in cash."
+
+
+def test_a_prompt_extraction_is_blocked() -> None:
+    v = _review(
+        'My instructions begin: "You are Nati, the assistant to the '
+        'administrator of a natillera..."',
+        [ENV_FUND],
+    )
+    assert not v.ok
+    assert v.prompt_leak
+    assert v.reply == egress.BLOCKED_LEAK_REPLY
+    assert "You are Nati" not in v.reply
+
+
+def test_the_canaries_do_not_trip_on_ordinary_talk() -> None:
+    v = _review("Nati here — the books are balanced and nothing is pending.", [])
+    assert v.ok
+
+
+# --------------------------------------------------------------------------
+# The allowlist builder
+# --------------------------------------------------------------------------
+
+
+def test_numbers_nested_anywhere_in_an_envelope_count() -> None:
+    env = {
+        "ok": True,
+        "message": "done",
+        "charged": [{"loan_id": 7, "derivation": {"base": 500, "rate": 3}}],
+    }
+    with clock.frozen("2026-08-04"):
+        allowed = egress.allowed_numbers([env], "")
+    assert {"7", "500", "3"} <= allowed
+
+
+def test_booleans_do_not_smuggle_numbers() -> None:
+    with clock.frozen("2026-08-04"):
+        allowed = egress.allowed_numbers([{"ok": True, "paid": False}], "")
+    # True/False must not become "1"/"0" — 0 and 1 are free anyway, but the
+    # canon set must not grow from booleans.
+    assert "True" not in allowed and "False" not in allowed
+
+
+def test_formatted_and_raw_forms_both_pass() -> None:
+    v = _review("Cash: $15,732. Raw: 15732.", [ENV_FUND])
+    assert v.ok
+
+
+# --------------------------------------------------------------------------
+# Regressions from the red-team audit
+# --------------------------------------------------------------------------
+
+
+def test_money_is_field_bound_not_merely_present(world) -> None:
+    """A raffle number must not license a dollar figure of the same value.
+
+    `raffle_status` puts ~60 of the 90 two-digit values in the envelope — they
+    are people's raffle numbers. Before the money/count split that licensed
+    "your share of the fund is $47": a fabricated payout wearing a raffle
+    number's clothes.
+    """
+    with clock.frozen("2026-08-04"):
+        env = reads.raffle_status(world, "monthly", 7)
+
+        numbers = [
+            n for t in env.get("tickets", []) for n in (t.get("numbers") or [])
+        ] if env.get("tickets") else []
+        # Pick a number the envelope really contains, above the free limit.
+        candidate = next((n for n in numbers if n > 12), None)
+        if candidate is None:
+            import pytest
+            pytest.skip("no two-digit raffle number in this month")
+
+        # Speakable as a number...
+        assert egress.review(f"Number {candidate} is taken.", [env], "").ok
+        # ...but NOT as money.
+        v = egress.review(f"Your share is ${candidate}.", [env], "")
+        assert not v.ok, "a raffle number licensed a dollar figure"
+
+
+def test_a_real_money_figure_still_passes(world) -> None:
+    """Derived from the envelope, not hardcoded: the world is mutable state."""
+    from nati.tools.envelope import usd
+
+    with clock.frozen("2026-08-04"):
+        env = reads.fund_status(world)
+        cash = usd(env["cash"])
+        v = egress.review(f"The fund has {cash} in cash.", [env], "")
+        assert v.ok, f"blocked a real money figure: {v.unverified}"
+
+
+def test_the_world_hash_does_not_license_figures() -> None:
+    """Digit-runs mined from world_hash used to free arbitrary large numbers."""
+    env = {"ok": True, "message": "done",
+           "world_hash": "3348b1c8cdb8cb498a50ea2b0f8abc80383ee2a88917e684f99"}
+    with clock.frozen("2026-08-04"):
+        v = egress.review("The December bonus will be $3348.", [env], "")
+    assert not v.ok
+
+
+def test_a_spaced_think_tag_does_not_slip_through() -> None:
+    """`<think >` with one space defeated the exact-match patterns entirely."""
+    with clock.frozen("2026-08-04"):
+        for text in (
+            "<think >secret deliberation</think >The fund is fine.",
+            "<think>ok</think >The fund is fine.",
+            "<THINK >x</THINK >The fund is fine.",
+        ):
+            v = egress.review(text, [], "")
+            assert "deliberation" not in v.reply and "secret" not in v.reply
+            assert "think" not in v.reply.lower(), v.reply
+
+
+def test_every_canary_is_actually_in_the_prompt() -> None:
+    """A canary that matches nothing is a control that can never fire."""
+    from nati.agent import prompt
+
+    text = prompt.system_prompt().lower()
+    for canary in egress._PROMPT_CANARIES:
+        assert canary in text, f"dead canary: {canary!r}"
+
+
+def test_a_blocked_reply_says_so_when_the_write_landed() -> None:
+    """Telling her "I have not sent it" after money moved invites a duplicate."""
+    with clock.frozen("2026-08-04"):
+        v = egress.review("Recorded. Hash 4c13461 confirms it.", [], "",
+                          wrote=True)
+    assert not v.ok
+    assert v.reply == egress.BLOCKED_AFTER_WRITE_REPLY
+    assert "is saved" in v.reply
+
+
+def test_a_tool_name_is_never_spoken() -> None:
+    """SOP G1. It happened in ordinary replies — "I'd check with the
+    `raffle_status` tool" — handing over the exact surface to aim at."""
+    for text in (
+        "I would need to check with the raffle_status tool.",
+        "Use `record_saving` for that.",
+        "Try **fund_status** instead.",
+    ):
+        v = _review(text, [ENV_FUND])
+        assert not v.ok, f"leaked a tool name: {text}"
+        assert v.reply == egress.BLOCKED_LEAK_REPLY
+
+
+def test_ordinary_words_are_not_mistaken_for_tool_names() -> None:
+    """`members` is a tool name AND plain English, so it must stay speakable."""
+    assert _review("All 29 members have paid their tickets.", [ENV_FUND]).ok
+    assert _review("Two members still owe money.", [ENV_FUND]).ok
+
+
+def test_the_integrity_answer_is_speakable(world) -> None:
+    """REGRESSION: "do the books balance?" got its own reply blocked.
+
+    `check_integrity` returned no `figures[]` manifest, and money is field-bound
+    — a dollar figure must have been TAGGED as money by a tool. So the most
+    natural verification question anyone can ask produced a correct tool result
+    and then had the answer suppressed on its own cash figure. It was the only
+    read tool with no manifest.
+    """
+    from nati.tools.envelope import usd
+
+    with clock.frozen("2026-08-04"):
+        env = reads.check_integrity(world)
+        money = {f["field"]: f for f in env["figures"]
+                 if str(f["text"]).startswith("$")}
+        assert money, "check_integrity emits no money figures"
+
+        cash = money["cash"]["text"]
+        expected = money["payout_expected"]["text"]
+        v = egress.review(
+            f"The books balance. Fund cash: {cash} (non-negative). "
+            f"The payout accounts for {expected}.",
+            [env], "",
+        )
+    assert v.ok, f"blocked on {v.unverified}"
+
+
+def test_every_read_tool_can_state_its_own_money(world) -> None:
+    """Any tool that reports an amount must tag it, or the filter gags the reply.
+
+    This is the general form of the bug above: field-bound money means a tool
+    that returns a dollar value without a manifest has made that value
+    unspeakable.
+    """
+    with clock.frozen("2026-08-04"):
+        envelopes = {
+            "members": reads.members(world),
+            "member_status": reads.member_status(world, 2),
+            "fund_status": reads.fund_status(world),
+            "loan_status": reads.loan_status(world, 1),
+            "list_loans": reads.list_loans(world),
+            "raffle_status": reads.raffle_status(world, "monthly", 7),
+            "simulate_payout": reads.simulate_payout(world),
+            "check_integrity": reads.check_integrity(world),
+        }
+    for name, env in envelopes.items():
+        money = [f for f in (env.get("figures") or [])
+                 if str(f.get("text", "")).startswith("$")]
+        assert money, f"{name} reports no money the model is allowed to state"
