@@ -10,6 +10,7 @@
     --bg: #14161b; --panel: #1c1f26; --panel2: #232732; --line: #2c313c;
     --ink: #e7e9ee; --muted: #9aa3b2; --accent: #7aa2ff;
     --user: #2a3550; --ok: #6fcf97; --refused: #f2c94c; --error: #eb5757;
+    --blocked: #7aa2ff;
     --radius: 10px;
   }
   * { box-sizing: border-box; }
@@ -111,6 +112,10 @@
   .step .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
   .step.ok .dot { background: var(--ok); }
   .step.refused .dot { background: var(--refused); }
+  /* The output filter suppressing a reply. Blue, not red: the
+     control worked. */
+  .step.blocked .dot { background: var(--blocked); }
+  .step.blocked { color: var(--blocked); }
   .step.error .dot { background: var(--error); }
   .step .note { color: var(--muted); opacity: .8; }
 
@@ -437,7 +442,8 @@ function renderSteps(steps) {
     const row = document.createElement("div");
     row.className = "step " + s.status;
     const verb = s.status === "refused" ? "refused"
-               : s.status === "error" ? "error" : "used";
+               : s.status === "error" ? "error"
+               : s.status === "blocked" ? "" : "used";
     // Built as nodes, not markup: the tool name comes from the server, and
     // nothing that crosses the wire is ever interpolated into innerHTML.
     const dot = document.createElement("span");
@@ -448,7 +454,7 @@ function renderSteps(steps) {
     name.textContent = s.name;
     label.append(name);
     row.append(dot, label);
-    if (s.status === "refused" && s.message) {
+    if ((s.status === "refused" || s.status === "blocked") && s.message) {
       const note = document.createElement("span");
       note.className = "note";
       note.textContent = "— " + s.message;

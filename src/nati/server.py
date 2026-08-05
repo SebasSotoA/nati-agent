@@ -32,6 +32,15 @@ from nati.world import db
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
+# What the chat shows when the output filter suppresses a reply. Plain language:
+# the person reading this is the administrator, not a developer.
+_FILTER_SAID = {
+    "figures": "held back an amount no tool had returned — asking again",
+    "internals": "held back a mention of how I work — asking again",
+    "off_domain": "held back a code block — asking again",
+    "reasoning": "held back leaked reasoning — asking again",
+}
+
 
 class _Conversation:
     """One conversation's in-memory state."""
@@ -133,6 +142,15 @@ def create_app(profile_name: str | None = None):
                                       "message": event.message})
                     elif isinstance(event, loop.Reply):
                         reply = event.content
+                    elif isinstance(event, loop.Retrying):
+                        # The filter suppressed a reply and the model is
+                        # answering again. Shown as a step so she can see the
+                        # control working rather than just a longer wait.
+                        steps.append({
+                            "name": "output filter", "status": "blocked",
+                            "message": _FILTER_SAID.get(
+                                event.cause, "the reply was not sent"),
+                        })
                     elif isinstance(event, loop.Failure):
                         reply = event.message
                         ok = False

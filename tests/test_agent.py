@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from nati.agent import loop, prompt
+from nati import clock
+from nati.agent import egress, loop, prompt
 from nati.agent.tracer import Tracer, new_conv_id
 from nati.config import Profile
 from nati.providers import ProviderError
@@ -54,11 +55,19 @@ def _turn(*, content="", reasoning="", tool_calls=None) -> RawTurn:
 
 
 def _fake_complete(script):
-    """Returns a complete() that yields the scripted turns in order."""
-    turns = iter(script)
+    """Returns a complete() that yields the scripted turns in order.
+
+    When the script runs out it repeats the last turn, rather than raising. The
+    output filter can ask the model to answer again after suppressing a reply, so
+    a turn may need one more model call than the test scripted — and a test
+    double should not turn that into a StopIteration.
+    """
+    remaining = list(script)
 
     def fake(messages, tools, profile):
-        return next(turns)
+        if len(remaining) > 1:
+            return remaining.pop(0)
+        return remaining[0]
 
     return fake
 
@@ -311,3 +320,93 @@ def test_raw_envelopes_survive_across_turns(con, tracer, monkeypatch) -> None:
     # history) cannot be asserted here — the fake `complete()` returns an empty
     # message list. The committed example traces demonstrate it against the
     # real model instead.
+
+
+# --------------------------------------------------------------------------
+# A suppressed reply is not the end of the turn
+# --------------------------------------------------------------------------
+
+
+def test_a_blocked_reply_gets_one_retry_and_a_real_answer(con, tracer, monkeypatch) -> None:
+    """Asking "what can I do if someone will not pay?" is ordinary bookkeeping.
+
+    The model answered it by naming a tool, printing an example call and
+    inventing $4.20 of interest — so the reply was rightly suppressed, and the
+    administrator got a sentence about instructions and NO answer. Telling the
+    model what was wrong lets it say the same thing properly.
+    """
+    script = [
+        # First attempt: invents a figure no tool returned.
+        _turn(content="He owes $210, and with interest that is $214.20."),
+        # After the correction: only figures it was actually given.
+        _turn(content="He owes $210, and it comes out of his year-end share."),
+    ]
+    # She names the $210 herself, as people do — so that figure is legitimately
+    # speakable. The invented $214.20 is not.
+    history, events = _run(con, tracer,
+                           "what if Henry will not pay the $210 he owes?",
+                           script, monkeypatch)
+
+    kinds = [type(e).__name__ for e in events]
+    assert "Retrying" in kinds, "the turn ended instead of asking again"
+
+    reply = next(e for e in events if isinstance(e, loop.Reply))
+    assert "214.20" not in reply.content, "the invented figure reached the user"
+    assert "$210" in reply.content, "the real answer was not delivered"
+
+    # The correction went into the history as a message the model can read.
+    corrections = [m for m in history
+                   if m["role"] == "user" and "NOT sent" in str(m["content"])]
+    assert len(corrections) == 1
+    # It must NOT quote the invented figure: the correction is a message in the
+    # conversation, and figures the administrator types are trusted, so repeating
+    # it back would launder it onto the allowlist.
+    assert "214.20" not in corrections[0]["content"]
+    assert "no tool returned" in corrections[0]["content"]
+
+
+def test_the_retry_happens_at_most_once(con, tracer, monkeypatch) -> None:
+    """One correction, not a hill to climb toward wording that slips through."""
+    bad = _turn(content="It is worth about $91,234 all told.")
+    monkeypatch.setattr(loop, "complete", _fake_complete([bad]))
+    history = loop.start_history()
+    events = list(loop.run_turn(con, history, "how much?", _profile(), tracer))
+
+    assert sum(1 for e in events if isinstance(e, loop.Retrying)) == 1
+    reply = next(e for e in events if isinstance(e, loop.Reply))
+    assert "91,234" not in reply.content
+    # Having failed twice, she is told the truth about WHY.
+    assert reply.content == egress.BLOCKED_REPLY
+
+
+def test_the_message_matches_what_actually_went_wrong(con, tracer, monkeypatch) -> None:
+    """Every cause used to collapse into whichever rule sat first in review()."""
+    cases = [
+        ("He owes $214.20 in total.", egress.BLOCKED_REPLY),
+        ("I would check that with the fund_status tool.", egress.BLOCKED_LEAK_REPLY),
+        ("Here you go:\n```python\nprint(1)\n```", egress.BLOCKED_OFF_DOMAIN_REPLY),
+    ]
+    for text, expected in cases:
+        bad = _turn(content=text)
+        monkeypatch.setattr(loop, "complete", _fake_complete([bad]))
+        history = loop.start_history()
+        events = list(loop.run_turn(con, history, "a question", _profile(), tracer))
+        reply = next(e for e in events if isinstance(e, loop.Reply))
+        assert reply.content == expected, f"wrong message for {text!r}"
+
+
+def test_money_is_reported_before_a_named_tool(con, tracer, monkeypatch) -> None:
+    """A reply can break several rules at once. The worst one decides the message.
+
+    The reply that started all this named three tools, printed a code block AND
+    invented cents. Whichever check sat first in the function decided what the
+    administrator was told — so she heard about instructions when the real
+    problem was a figure she might have repeated to somebody.
+    """
+    with clock.frozen("2026-08-04"):
+        v = egress.review(
+            "Use the fund_status tool; he owes $214.20.\n```json\n{}\n```",
+            [], "",
+        )
+    assert v.cause == egress.FIGURES
+    assert v.reply == egress.BLOCKED_REPLY

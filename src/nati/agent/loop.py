@@ -62,6 +62,18 @@ class ToolStep:
 
 
 @dataclass
+class Retrying:
+    """The filter suppressed a reply; the model is answering again.
+
+    Surfaced so the administrator sees the control working instead of a longer
+    silence — and so a teammate can tell "the filter caught something" apart from
+    "the agent is broken".
+    """
+
+    cause: str
+
+
+@dataclass
 class Reply:
     """The final assistant text for this turn."""
 
@@ -75,7 +87,7 @@ class Failure:
     message: str
 
 
-Event = Thinking | ToolStep | Reply | Failure
+Event = Thinking | ToolStep | Retrying | Reply | Failure
 
 
 # --------------------------------------------------------------------------
@@ -126,6 +138,7 @@ def run_turn(
     user_turn = sum(1 for m in history if m.get("role") == "user")
     audit_seq = 0
     wrote_this_turn = False
+    retried = False        # at most one correction per turn
     for call_index in range(1, max_steps + 1):
         yield Thinking()
 
@@ -170,8 +183,34 @@ def run_turn(
                 prompt_leak=verdict.prompt_leak, unverified=verdict.unverified,
                 original=turn.content or "",
             )
+
+            # A block used to END the turn, which was the wrong consequence.
+            # Asking "what can I do if someone will not pay me?" is ordinary
+            # bookkeeping; the model answered it by naming a tool, printing an
+            # example call and inventing $4.20 of interest — so the reply was
+            # rightly suppressed, and the administrator got a fixed sentence
+            # about instructions and no answer to her question.
+            #
+            # So: tell the model exactly what was wrong and let it say the same
+            # thing properly. NOTHING is loosened — the identical replies are
+            # still refused, they simply are not the end of the conversation.
+            # Capped at ONE correction, so the model gets a single chance to
+            # restate rather than a hill to climb toward wording that slips
+            # through. Every attempt stays in the trace.
+            if not verdict.ok and not retried:
+                retried = True
+                history.append({"role": "user", "content": verdict.correction()})
+                tracer.note(
+                    f"reply suppressed ({verdict.cause}); asked the model to "
+                    "answer again",
+                    author="egress",
+                )
+                yield Retrying(verdict.cause or "blocked")
+                continue
+
             tracer.conv_end("reply", {"model_calls": call_index,
-                                      "egress_ok": verdict.ok})
+                                      "egress_ok": verdict.ok,
+                                      "retried": retried})
             # The model occasionally returns nothing at all — no content and no
             # tool call — which reached the browser as a blank bubble that reads
             # as a crash. The same "never empty" contract the tools follow

@@ -414,3 +414,46 @@ def test_every_read_tool_can_state_its_own_money(world) -> None:
         money = [f for f in (env.get("figures") or [])
                  if str(f.get("text", "")).startswith("$")]
         assert money, f"{name} reports no money the model is allowed to state"
+
+
+def test_the_correction_cannot_launder_a_figure() -> None:
+    """The retry text becomes a message in the conversation, and figures the
+    administrator types are trusted — so if the correction quoted the invented
+    amount, restating it would then pass. It must not name the number."""
+    with clock.frozen("2026-08-04"):
+        first = egress.review("It comes to $91,234 all told.", [], "")
+        assert not first.ok and first.cause == egress.FIGURES
+
+        correction = first.correction()
+        assert "91,234" not in correction and "91234" not in correction
+
+        # Saying it again, with the correction now in the conversation, still fails.
+        again = egress.review("It comes to $91,234 all told.", [], correction)
+    assert not again.ok, "the correction laundered the figure onto the allowlist"
+
+
+def test_describing_what_it_does_is_not_blocked() -> None:
+    """REGRESSION: "What can you do?" was refused.
+
+    The answer said "numbers 00-99", which is a fact the SYSTEM handed the model
+    in the tool descriptions — not one it invented. Numerals from the schemas are
+    allowed exactly as the system prompt's are.
+    """
+    with clock.frozen("2026-08-04"):
+        for text in (
+            "I keep the books: savings, loans, monthly interest and the raffles. "
+            "The monthly raffle takes two numbers from 00 to 99.",
+            "The cycle runs from month 1 to month 11; December is not part of it.",
+            "A phone number has to be exactly 10 digits.",
+        ):
+            v = egress.review(text, [], "")
+            assert v.ok, f"blocked on {v.unverified}: {text!r}"
+
+
+def test_but_a_price_still_has_to_be_looked_up() -> None:
+    """The widening is numbers only. Money stays field-bound, so a ticket price
+    cannot be recited from the schema — it must come from a tool result."""
+    with clock.frozen("2026-08-04"):
+        v = egress.review("A monthly ticket costs $20.", [], "")
+    assert not v.ok
+    assert v.cause == egress.FIGURES

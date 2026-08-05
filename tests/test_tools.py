@@ -757,3 +757,36 @@ def test_a_negative_out_of_range_id_also_refuses(con, ctx) -> None:
     result = call(con, ctx, "member_status", member_id=-(2 ** 63) - 1)
     assert result.for_the_model["ok"] is False
     assert result.reason == "absurd_number"
+
+
+def test_the_loan_book_answers_interest_in_one_result(con, ctx) -> None:
+    """A real conversation asked "show everyone's active loans and how much
+    interest they have paid" and got nothing.
+
+    `list_loans` reported balances but not interest, so the model either had to
+    call a second tool once per loan or work the split out itself — and working
+    it out is precisely what it is not allowed to do. It correctly said it did
+    not have the figures, which is the right answer to the wrong problem: the gap
+    was in the tool. `reads.py`'s own rule is one question, one result.
+    """
+    body = call(con, ctx, "list_loans", status="active").for_the_model
+    assert body["ok"] is True
+    assert body["loans"], "no active loans in the seeded world"
+
+    for loan in body["loans"]:
+        for field in ("interest_charged", "interest_paid", "capital_repaid"):
+            assert field in loan, f"{field} missing from the loan book"
+
+    # And the total, so "how much interest have we collected?" is one call too.
+    assert "interest_paid_total" in body
+    assert body["interest_paid_total"] == sum(
+        l["interest_paid"] for l in body["loans"]
+    )
+
+    # Every one of those amounts must be speakable AS MONEY, or the answer gets
+    # suppressed on its own figures.
+    from nati.agent import egress
+    money = egress.allowed_money([body], "")
+    for loan in body["loans"]:
+        for field in ("interest_charged", "interest_paid", "capital_repaid"):
+            assert str(loan[field]) in money, f"{field} is not money-tagged"

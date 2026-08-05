@@ -419,15 +419,36 @@ def list_loans(
             "principal": figures.money(f"l{lid}_principal", int(row["principal"])),
             "monthly_rate": figures.number(f"l{lid}_rate", int(row["monthly_rate"])),
             "balance": figures.money(f"l{lid}_balance", balance.total),
+            # Interest, split into what has been charged and what has actually
+            # been collected. Without these the loan book could not answer "how
+            # much interest has each person paid?" in one result — the model had
+            # to either call a second tool per loan or work it out itself, and
+            # working it out is exactly what it is not allowed to do. It ended up
+            # correctly saying it did not have the figures, which is the right
+            # answer to the wrong problem: the gap was in the tool.
+            "interest_charged": figures.money(
+                f"l{lid}_interest_charged", balance.interest_charged
+            ),
+            "interest_paid": figures.money(
+                f"l{lid}_interest_paid", balance.interest_paid
+            ),
+            "capital_repaid": figures.money(
+                f"l{lid}_capital_repaid", balance.capital_paid
+            ),
         })
 
     if not listed:
         return ok("There are no loans matching that.", loans=[], count=0)
+    interest_paid_total = sum(l["interest_paid"] for l in listed)
     return ok(
-        f"There are {len(listed)} loans. The fund is still owed {usd(total)}.",
+        f"There are {len(listed)} loans. The fund is still owed {usd(total)}, "
+        f"and {usd(interest_paid_total)} of interest has been paid across them.",
         loans=listed,
         count=len(listed),
         owed_to_the_fund=figures.money("owed_to_the_fund", total),
+        interest_paid_total=figures.money(
+            "interest_paid_total", interest_paid_total
+        ),
         figures=figures,
     )
 

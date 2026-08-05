@@ -231,7 +231,7 @@ to break the agent:
 uv run nati fund              # inspect the fund's books
 uv run nati payout            # simulate the year-end payout
 uv run nati tools             # list the 19 tools, or run one by hand
-uv run pytest                 # 384 tests, no network
+uv run pytest                 # 392 tests, no network
 ```
 
 ### The web chat
@@ -375,7 +375,7 @@ nati/
 │       ├── db.py             the single write chokepoint + audit + world hash
 │       └── queries.py        SQL → the structures calc works on
 │
-└── tests/                    384 tests, no network
+└── tests/                    392 tests, no network
     ├── test_calc.py          the money arithmetic
     ├── test_world.py         schema guarantees, the seed's figures
     ├── test_writes.py        atomicity, invariants, the clock
