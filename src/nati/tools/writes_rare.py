@@ -1,4 +1,4 @@
-"""The 7 rare write tools. Dangerous enough that most are two-phase.
+"""The 6 rare write tools. Dangerous enough that every one is two-phase.
 
 Everything here is something the administrator does a few times a year — a new
 loan, a draw, a correction — and each one can move real money the wrong way if
