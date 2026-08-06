@@ -445,7 +445,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nati",
-        description="Natillera Bot — savings-group assistant (red-team target).",
+        description="Natillera Bot — savings-group assistant.",
     )
     parser.add_argument("--version", action="version", version=f"nati {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)

@@ -1,7 +1,7 @@
 [project]
 name = "nati"
 version = "0.1.0"
-description = "Natillera Bot — asistente para una natillera colombiana (objetivo de ejercicio red-team)"
+description = "Natillera Bot — asistente para una natillera colombiana"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
