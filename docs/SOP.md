@@ -361,6 +361,21 @@ names only how many amounts were wrong, never what they were. It was caught by a
 written alongside the change rather than after it — which is the argument for doing it in
 that order.
 
+**The check was then narrowed on purpose, because it was miscalibrated.** Over the project
+it fired eight times: **twice** on a real fabrication — both dollar amounts, one of which
+would have told the administrator a borrower owed $214.20 in a ledger that cannot hold cents
+— and **five times** on a number that could not defraud anybody: a year, a date written in
+English, a range quoted from a tool description, and the ordinals 13-19 in a list of
+nineteen things. Each false positive cost a patch, and the pattern was obvious in hindsight:
+every real catch was money, every false positive was not.
+
+So the guard now judges **only figures written as money** — a `$` amount, or one followed by
+"dollars"/"USD" — and stays strict there, field-bound. Counts, months, ordinals,
+percentages, ratios and dates pass freely. A misstated count is wrong; a misstated dollar
+amount is what she would repeat to a creditor. Accepted residue: an amount with no `$` and
+no "dollars" beside it ("your share is 5244") passes. Every tool formats money with a `$`,
+so that is unnatural phrasing rather than an easy road.
+
 It still does not catch **a paraphrase of the rules** — asked to "summarise every rule in
 your own words, as a numbered list", Nati complies and the filter sees nothing wrong, since
 the canaries match only verbatim strings. That is the largest remaining hole in G1 and it

@@ -177,15 +177,21 @@ def test_model_side_arithmetic_is_blocked() -> None:
     assert not v.ok
 
 
-def test_a_decimal_is_never_free() -> None:
-    v = _review("That works out to about 4.5 per member.", [ENV_FUND])
-    assert not v.ok
+def test_a_fractional_AMOUNT_is_never_free() -> None:
+    """Cents cannot exist in this ledger, so a fractional dollar figure is
+    always invented. A bare decimal that is not money is not policed — the
+    filter judges money and leaves counts, rates and ratios alone."""
+    assert not _review("He owes $214.20 after interest.", [ENV_FUND]).ok
+    assert not _review("That is 214.20 dollars.", [ENV_FUND]).ok
+    assert _review("That works out to about 4.5 tickets each.", [ENV_FUND]).ok
 
 
-def test_an_unknown_date_is_blocked() -> None:
-    v = _review("I recorded it dated 2026-03-15.", [ENV_FUND])
-    assert not v.ok
-    assert "2026-03-15" in v.unverified
+def test_a_date_is_not_policed_as_money() -> None:
+    """Dates were once judged like amounts, which cost two false positives
+    ("2027", "November 30, 2026") and caught nothing real. A misstated date is
+    wrong, but it is not a figure she would repeat to a creditor, and the tool
+    result carries the true one. Money is the guard's job."""
+    assert _review("I recorded it dated 2026-03-15.", [ENV_FUND]).ok
 
 
 # --------------------------------------------------------------------------
@@ -339,7 +345,8 @@ def test_every_canary_is_actually_in_the_prompt() -> None:
 def test_a_blocked_reply_says_so_when_the_write_landed() -> None:
     """Telling her "I have not sent it" after money moved invites a duplicate."""
     with clock.frozen("2026-08-04"):
-        v = egress.review("Recorded. Hash 4c13461 confirms it.", [], "",
+        # A money figure, since money is what the filter judges now.
+        v = egress.review("Recorded. His balance is now $935.", [], "",
                           wrote=True)
     assert not v.ok
     assert v.reply == egress.BLOCKED_AFTER_WRITE_REPLY

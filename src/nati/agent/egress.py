@@ -64,6 +64,18 @@ _HASH_LIKE = re.compile(r"\b[0-9a-f]{16,}\b", re.IGNORECASE)
 # of resting entirely on the prompt — which was observed to give way and write a
 # linked-list reversal in Python when asked nicely.
 _CODE_FENCE = re.compile(r"```|~~~")
+# A numbered-list marker at the start of a line: "13. " or "4) ". Structure, not
+# a claim about money — but "13." onward exceeded the old free-count limit, so a
+# model listing nineteen things had items 13-19 flagged as invented figures.
+_LIST_MARKER = re.compile(r"^[ \t]*\d{1,3}[.)](?=\s)", re.MULTILINE)
+
+# A figure written AS MONEY: "$1,234", or "1234 dollars" / "1234 USD". The only
+# numerals the filter judges.
+_MONEY_SHAPED = re.compile(
+    r"\$\s?\d[\d,]*(?:\.\d+)?"
+    r"|\b\d[\d,]*(?:\.\d+)?(?=\s*(?:dollars?|usd)\b)",
+    re.IGNORECASE,
+)
 
 
 def _tool_names() -> tuple[str, ...]:
@@ -219,7 +231,7 @@ class Verdict:
     # What the model named that it should not have (tool names, prompt phrases).
     disclosed: list[str] = field(default_factory=list)
 
-    def correction(self) -> str:
+    def correction(self, question: str = "") -> str:
         """The instruction handed back to the model so it can answer again.
 
         A block used to be the end of the turn: the administrator got a fixed
@@ -229,7 +241,16 @@ class Verdict:
 
         This deliberately does not restate the rule catalogue — it names only
         what this particular reply did, which the model already knows.
+
+        `question` is the administrator's own question, repeated back. Without it
+        the correction BECAME the question: told only that it had stated an
+        unverifiable amount, the model answered "I do not have any amounts to
+        share" — a perfect non-answer to "what are your available tools?".
         """
+        asked = (
+            f' She asked: "{question.strip()}" — answer THAT, not this message.'
+            if question.strip() else ""
+        )
         if self.cause == FIGURES:
             # The offending amounts are deliberately NOT quoted here. This text
             # becomes a message in the conversation, and figures the
@@ -248,7 +269,7 @@ class Verdict:
                 "plainly that you do not have it — and say that in her words, "
                 "describing what is missing, NOT by naming a tool, a field or a "
                 "function. Naming one is itself a reason the reply will be "
-                "withheld, so do not explain where your numbers came from."
+                "withheld, so do not explain where your numbers came from." + asked
             )
         if self.cause == INTERNALS:
             named = ", ".join(self.disclosed[:4])
@@ -257,7 +278,7 @@ class Verdict:
                 f"it revealed how you work internally ({named}). Answer the "
                 "question again in plain language, describing what happens to "
                 "the money rather than which tool does it, and never showing a "
-                "tool name, a parameter, or an example call."
+                "tool name, a parameter, or an example call." + asked
             )
         if self.cause == OFF_DOMAIN:
             return (
@@ -265,11 +286,11 @@ class Verdict:
                 "it contained a code block. You keep this natillera's books; you "
                 "do not write code or show machine-readable output. If the "
                 "question was about the books, answer it in plain sentences. If "
-                "it was not, say plainly that it is not what you do."
+                "it was not, say plainly that it is not what you do." + asked
             )
         return (
             "Your previous reply was NOT sent to the administrator. Answer the "
-            "question again, plainly, using only figures a tool has given you."
+            "question again, plainly, using only figures a tool has given you." + asked
         )
 
 
@@ -421,30 +442,31 @@ def review(
     # because a wrong figure is the thing she might repeat to somebody.
     # ----------------------------------------------------------------------
 
-    # 2. Every numeral must be accounted for, and anything written AS MONEY must
-    #    have been TAGGED as money by a tool — not merely appear somewhere in an
-    #    envelope. Without that second test, a raffle number licensed a dollar
-    #    figure of the same value.
-    allowed = allowed_numbers(envelopes, user_text)
+    # 2. Only figures written AS MONEY are judged.
+    #
+    #    This was once "every numeral must be accounted for", and that was the
+    #    wrong shape. Across this project the check fired eight times: twice on a
+    #    genuine fabrication — both dollar amounts, one of which would have told
+    #    the administrator a borrower owed $214.20 when the ledger cannot hold
+    #    cents — and five times on a number that could not defraud anybody: a
+    #    year, a date written in English, a range from a tool description, and
+    #    the ordinals 13-19 in a list of nineteen things. Each cost a patch.
+    #
+    #    A count, a month, an ordinal, a percentage: none of them move money, and
+    #    none of them are what she would repeat to somebody. A dollar amount is
+    #    both. So the guard narrows to exactly that, and gets stricter there:
+    #    money is field-bound, meaning a `$` figure must have been TAGGED as
+    #    money by a tool — a raffle number cannot wear a dollar sign.
+    #
+    #    Accepted residue, recorded in the SOP: an amount stated with no `$` and
+    #    no "dollars" beside it ("your share is 5244") passes. Every tool
+    #    formats money with a `$`, so that is unnatural phrasing rather than an
+    #    easy road, and figures spelled as words were always beyond a regex.
     money = allowed_money(envelopes, user_text)
-    unverified = []
-    for token in _number_tokens(text):
-        canon = _canon(token)
-        if token.startswith("$"):
-            # Money is field-bound. Small counts are NOT free here: "$5" is a
-            # claim about the books, not a count of anything.
-            if canon not in money:
-                unverified.append(token)
-            continue
-        if canon in allowed:
-            continue
-        if not _ISO_DATE.fullmatch(canon):
-            try:
-                if 0 <= int(canon) <= _FREE_MAX:
-                    continue
-            except ValueError:
-                pass  # a decimal — never free
-        unverified.append(token)
+    unverified = [
+        token for token in _MONEY_SHAPED.findall(_LIST_MARKER.sub(" ", text))
+        if _canon(token) not in money
+    ]
 
     if unverified:
         return Verdict(

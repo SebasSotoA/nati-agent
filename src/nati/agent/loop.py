@@ -199,7 +199,16 @@ def run_turn(
             # through. Every attempt stays in the trace.
             if not verdict.ok and not retried:
                 retried = True
-                history.append({"role": "user", "content": verdict.correction()})
+                # A `system` message, not a `user` one. As a user turn it read
+                # like a fresh instruction from the administrator and displaced
+                # her actual question — asked "what are your available tools?"
+                # the model came back with "I do not have any amounts to share".
+                # It is also no longer trusted text for the figure allowlist,
+                # which removes a laundering path for free.
+                history.append({
+                    "role": "system",
+                    "content": verdict.correction(user_text),
+                })
                 tracer.note(
                     f"reply suppressed ({verdict.cause}); asked the model to "
                     "answer again",

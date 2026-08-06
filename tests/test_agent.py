@@ -354,15 +354,21 @@ def test_a_blocked_reply_gets_one_retry_and_a_real_answer(con, tracer, monkeypat
     assert "214.20" not in reply.content, "the invented figure reached the user"
     assert "$210" in reply.content, "the real answer was not delivered"
 
-    # The correction went into the history as a message the model can read.
+    # The correction goes in as a SYSTEM instruction, not a user turn. As a user
+    # turn it read like a fresh question from the administrator and displaced the
+    # real one — asked "what are your available tools?", the model answered "I do
+    # not have any amounts to share". It is also not trusted text for the money
+    # allowlist, which closes a laundering path.
     corrections = [m for m in history
-                   if m["role"] == "user" and "NOT sent" in str(m["content"])]
+                   if m["role"] == "system" and "NOT sent" in str(m["content"])]
     assert len(corrections) == 1
     # It must NOT quote the invented figure: the correction is a message in the
     # conversation, and figures the administrator types are trusted, so repeating
     # it back would launder it onto the allowlist.
     assert "214.20" not in corrections[0]["content"]
     assert "no tool returned" in corrections[0]["content"]
+    # And it repeats her question, so the model cannot lose it.
+    assert "Henry" in corrections[0]["content"]
 
 
 def test_the_retry_happens_at_most_once(con, tracer, monkeypatch) -> None:
