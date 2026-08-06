@@ -60,7 +60,18 @@ def _mint(
     digest = hmac.new(
         _KEY, _canonical(conv_id, tool, args), hashlib.sha256
     ).hexdigest()[:16]
-    _pending[digest] = (time.monotonic() + _TTL_SECONDS, turn)
+    # Keep the EARLIEST turn this confirmation was ever offered in. Re-minting
+    # used to overwrite it with the current turn, which quietly moved the human
+    # gate: if the model made any failed attempt in the same turn as her "yes",
+    # that re-mint stamped the current turn and her genuine confirmation was
+    # then refused as "same turn". She said yes and was asked again.
+    existing = _pending.get(digest)
+    first_offered = turn
+    if existing is not None:
+        _, previous = existing
+        if previous is not None and (turn is None or previous < turn):
+            first_offered = previous
+    _pending[digest] = (time.monotonic() + _TTL_SECONDS, first_offered)
     _sweep()
     return digest
 
@@ -85,11 +96,12 @@ def _valid(
     ).hexdigest()[:16]
     if not hmac.compare_digest(token, expected):
         return False
-    entry = _pending.pop(expected, None)
+    entry = _pending.get(expected)
     if entry is None:
         return False
     expiry, minted_turn = entry
     if time.monotonic() > expiry:
+        _pending.pop(expected, None)
         return False
     # THE HUMAN GATE. Without this the model could mint a token and spend it
     # inside the same user turn — the loop allows several model calls per
@@ -97,7 +109,12 @@ def _valid(
     # not "the administrator agreed". Requiring a later turn means her message
     # has to arrive in between.
     if turn is not None and minted_turn is not None and turn <= minted_turn:
+        # NOT consumed. The check is READ-ONLY until everything passes: an
+        # early `pop` meant a premature attempt burned a perfectly good
+        # confirmation, and only a lucky re-mint put it back.
         return False
+
+    _pending.pop(expected, None)      # single use — spent only now that it is valid
     return True
 
 

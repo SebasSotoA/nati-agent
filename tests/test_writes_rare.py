@@ -755,3 +755,39 @@ def test_a_reversal_cannot_overdraw_the_fund(con, ctx) -> None:
     assert attempt.for_the_model["ok"] is False
     assert attempt.reason == "invariant_broken"
     assert q.fund(con, CYCLE_DAY).cash == 0, "the fund went negative"
+
+
+def test_a_premature_attempt_does_not_burn_her_confirmation(con, ctx) -> None:
+    """REGRESSION: the token was consumed BEFORE the turn was checked.
+
+    A same-turn spend attempt popped a perfectly good confirmation, and only an
+    accidental re-mint put it back. Worse, every re-mint stamped the CURRENT
+    turn, which quietly moved the human gate: if the model made any failed call
+    in the same turn as her "yes", her genuine confirmation was then refused as
+    "same turn" and she was asked all over again.
+    """
+    args = {"key": "monthly_prize", "value": 70}
+
+    def attempt(turn: int, **extra):
+        return registry.dispatch(
+            con, "set_setting", {**args, **extra},
+            db.Ctx(conv_id="burn", seq=1, turn=turn),
+        ).for_the_model
+
+    token = attempt(1)["token"]
+
+    # The model tries to spend it immediately. Refused — and must NOT consume it.
+    assert attempt(1, confirm_token=token)["ok"] is False
+
+    # It also fumbles with the wrong amount in the turn she actually says yes.
+    registry.dispatch(
+        con, "set_setting", {"key": "monthly_prize", "value": 999,
+                             "confirm_token": token},
+        db.Ctx(conv_id="burn", seq=1, turn=2),
+    )
+
+    # Her real "yes" still works. It did not before.
+    assert attempt(2, confirm_token=token)["ok"] is True
+
+    # And it is still single use.
+    assert attempt(3, confirm_token=token)["ok"] is False
