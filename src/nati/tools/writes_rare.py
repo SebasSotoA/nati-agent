@@ -1,4 +1,8 @@
-"""The 6 rare write tools. Dangerous enough that every one is two-phase.
+"""The 6 rare write tools, every one two-phase — plus `mark_ticket_paid`.
+
+`mark_ticket_paid` is daily and single-phase and belongs in `writes.py`; it ended
+up here and the filename now lies about it. A move, not a rewrite, whenever the
+write path is next open for changes.
 
 Everything here is something the administrator does a few times a year — a new
 loan, a draw, a correction — and each one can move real money the wrong way if

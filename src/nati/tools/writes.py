@@ -1,4 +1,8 @@
-"""The 5 day-to-day write tools.
+"""Four of the five day-to-day write tools.
+
+The fifth, `mark_ticket_paid`, sits in `writes_rare.py` — the wrong home, since
+it is daily and single-phase like these. Left there for now rather than moved on
+the eve of a run; noted so the next reader is not misled by the filenames.
 
 What holds this layer up:
 
