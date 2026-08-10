@@ -419,6 +419,25 @@ def list_loans(
             "principal": figures.money(f"l{lid}_principal", int(row["principal"])),
             "monthly_rate": figures.number(f"l{lid}_rate", int(row["monthly_rate"])),
             "balance": figures.money(f"l{lid}_balance", balance.total),
+            # What that balance is MADE OF. Missing these cost a real reply: the
+            # loan book gave interest charged ($120) and paid ($96) but not the
+            # $24 still outstanding, so asked what Sebastian owed the model
+            # subtracted to get the 24 — right — and then added it to the $470,
+            # which already contained it, reaching $494. It would have had her
+            # collect $24 too much. The filter caught it, because neither figure
+            # came from a tool.
+            #
+            # This is the SECOND time this exact shape appeared here (see the
+            # interest fields below, added for the same reason). The lesson is not
+            # "the model does arithmetic"; it is that "the model never does
+            # arithmetic" places an obligation on the TOOL: every figure a natural
+            # answer needs must be handed over, or it will be derived.
+            "capital_outstanding": figures.money(
+                f"l{lid}_capital_outstanding", balance.capital_outstanding
+            ),
+            "interest_outstanding": figures.money(
+                f"l{lid}_interest_outstanding", balance.interest_outstanding
+            ),
             # Interest, split into what has been charged and what has actually
             # been collected. Without these the loan book could not answer "how
             # much interest has each person paid?" in one result — the model had

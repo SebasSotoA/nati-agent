@@ -569,3 +569,35 @@ def test_a_figure_cannot_be_laundered_through_the_correction() -> None:
     envelopes, said = egress.conversation_context(history)
     assert "9999" not in egress.allowed_money(envelopes, said)
     assert not egress.review("Your share is $9,999.", envelopes, said).ok
+
+
+def test_the_loan_book_supplies_the_balance_split_so_nothing_is_derived() -> None:
+    """The rule "the model never does arithmetic" obliges the TOOL to hand over
+    every figure a natural answer needs.
+
+    Asked what Sebastian owed, the model had `balance` ($470), `interest_charged`
+    ($120) and `interest_paid` ($96) from `list_loans` but not the $24 still
+    outstanding. So it subtracted to get 24 — correct — and then added it to the
+    $470 that already contained it, reaching $494: $24 more than he owes. Both
+    derived figures were suppressed because no tool returned them.
+    """
+    from nati.world import db
+    from nati.tools import registry
+
+    con = db.connect()
+    try:
+        ctx = db.Ctx(conv_id="20260810T000000Z-111111", seq=1, turn=1)
+        env = registry.dispatch(con, "list_loans", {}, ctx).for_the_model
+        loan = next(l for l in env["loans"] if l["loan_id"] == 5)
+        # The split is present, and it adds up to the balance the same tool gave.
+        assert loan["capital_outstanding"] + loan["interest_outstanding"] == \
+            loan["balance"]
+        # And every part of it is speakable as money without any arithmetic.
+        allowed = egress.allowed_money([env], "")
+        for key in ("balance", "capital_outstanding", "interest_outstanding",
+                    "interest_charged", "interest_paid"):
+            assert str(loan[key]) in allowed, f"{key} is not money-speakable"
+        # The wrong answer stays wrong: nothing licenses 494.
+        assert "494" not in allowed
+    finally:
+        con.close()
