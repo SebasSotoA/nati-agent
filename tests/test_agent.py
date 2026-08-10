@@ -397,7 +397,7 @@ def test_the_message_matches_what_actually_went_wrong(con, tracer, monkeypatch) 
     """Every cause used to collapse into whichever rule sat first in review()."""
     cases = [
         ("He owes $214.20 in total.", egress.BLOCKED_REPLY),
-        ("I would check that with the fund_status tool.", egress.BLOCKED_LEAK_REPLY),
+        ("I would check that with the fund_status tool.", egress.BLOCKED_TOOLNAME_REPLY),
         ("Here you go:\n```python\nprint(1)\n```", egress.BLOCKED_OFF_DOMAIN_REPLY),
     ]
     for text, expected in cases:

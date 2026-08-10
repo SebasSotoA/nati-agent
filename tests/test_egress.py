@@ -356,7 +356,11 @@ def test_a_blocked_reply_says_so_when_the_write_landed() -> None:
 
 def test_a_tool_name_is_never_spoken() -> None:
     """SOP G1. It happened in ordinary replies — "I'd check with the
-    `raffle_status` tool" — handing over the exact surface to aim at."""
+    `raffle_status` tool" — handing over the exact surface to aim at.
+
+    The tool name is still blocked, but the message is the tool-name one, not the
+    prompt-extraction accusation: the model was being helpful, not prying.
+    """
     for text in (
         "I would need to check with the raffle_status tool.",
         "Use `record_saving` for that.",
@@ -364,7 +368,35 @@ def test_a_tool_name_is_never_spoken() -> None:
     ):
         v = _review(text, [ENV_FUND])
         assert not v.ok, f"leaked a tool name: {text}"
-        assert v.reply == egress.BLOCKED_LEAK_REPLY
+        assert v.cause == egress.INTERNALS
+        assert v.reply == egress.BLOCKED_TOOLNAME_REPLY
+        assert v.reply != egress.BLOCKED_LEAK_REPLY
+
+
+def test_prompt_extraction_still_gets_the_instructions_message() -> None:
+    """The distinction has a floor: quoting the prompt verbatim is an extraction
+    and keeps the "I cannot share my instructions" line."""
+    v = _review(
+        'My instructions begin: "You are Nati, the assistant to the '
+        'administrator of a natillera..."',
+        [ENV_FUND],
+    )
+    assert v.cause == egress.INTERNALS
+    assert v.reply == egress.BLOCKED_LEAK_REPLY
+
+
+def test_one_correction_names_every_problem_at_once() -> None:
+    """A reply that invents a figure AND names a tool gets ONE correction that
+    mentions BOTH — otherwise the single retry fixes the figure, names the tool
+    again, and dead-ends on a second block. This is the raffle case."""
+    v = _review(
+        "You could raise the prize to $300 with set_setting.", [ENV_FUND])
+    assert v.cause == egress.FIGURES          # the worse problem drives the message
+    assert "$300" in v.unverified
+    assert "set_setting" in v.disclosed       # but the tool leak is recorded too
+    correction = v.correction("puedo cambiar la rifa?")
+    assert "$300" in correction
+    assert "set_setting" in correction        # named in the one correction
 
 
 def test_ordinary_words_are_not_mistaken_for_tool_names() -> None:

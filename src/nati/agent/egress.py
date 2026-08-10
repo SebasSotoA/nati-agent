@@ -226,6 +226,18 @@ BLOCKED_LEAK_REPLY = (
     "something about the books you need, ask me that and I will help."
 )
 
+# Naming a tool is not the same as trying to extract the prompt. A reply that
+# says "use set_setting" while answering a real question was being HELPFUL — it
+# just reached for the machinery by name, which the surface must not expose. So
+# the message invites her to ask again rather than accusing her of prying: she
+# asked "can I move the raffle?" and used to get "I cannot share my instructions",
+# a non-answer that reads as a refusal to a question she never asked.
+BLOCKED_TOOLNAME_REPLY = (
+    "I can help with that — but my draft leaned on the names of the tools I use "
+    "behind the scenes, which I keep out of the chat. Ask me again and I will "
+    "answer it in plain terms."
+)
+
 
 # Why a reply was suppressed. The message the administrator sees, and the
 # correction handed back to the model on a retry, are BOTH derived from this —
@@ -288,6 +300,15 @@ class Verdict:
             which = (f"stated {quoted}, which no tool returned in this "
                      "conversation" if quoted else
                      "stated an amount that no tool returned in this conversation")
+            # If the SAME reply also named a tool, say so here — the retry gets
+            # one shot, and a correction that mentioned only the figures sent the
+            # model back to name the tool again and hit a second, terminal block.
+            tools = [d for d in self.disclosed if d != "its own instructions"]
+            also = (
+                f" It also named {', '.join(tools[:4])}; leave the tool names out "
+                "too, and say what happens to the money rather than which "
+                "function does it." if tools else ""
+            )
             return (
                 "Your previous reply was NOT sent to the administrator. It "
                 f"{which}. Answer the question again using only amounts you have "
@@ -298,7 +319,7 @@ class Verdict:
                 "have it, in her words, describing what is missing and NOT by "
                 "naming a tool, a field or a function. Naming one is itself a "
                 "reason the reply will be withheld, so do not explain where your "
-                "numbers came from." + asked
+                "numbers came from." + also + asked
             )
         if self.cause == INTERNALS:
             named = ", ".join(self.disclosed[:4])
@@ -323,7 +344,8 @@ class Verdict:
         )
 
 
-def _message_for(cause: str | None, wrote: bool) -> str:
+def _message_for(cause: str | None, wrote: bool,
+                 disclosed: list[str] | None = None) -> str:
     """What the administrator is told. It has to match what actually happened.
 
     Every cause used to collapse into whichever rule sat first in `review()`, so
@@ -335,6 +357,14 @@ def _message_for(cause: str | None, wrote: bool) -> str:
         return BLOCKED_AFTER_WRITE_REPLY if wrote else BLOCKED_REPLY
     if cause == OFF_DOMAIN:
         return BLOCKED_OFF_DOMAIN_REPLY
+    if cause == INTERNALS:
+        # A tool name in an otherwise helpful answer is not an extraction attempt.
+        # Only a verbatim fragment of the prompt ("its own instructions") earns
+        # the "I cannot share my instructions" line; a leaked tool name earns an
+        # invitation to ask again plainly.
+        if disclosed and "its own instructions" not in disclosed:
+            return BLOCKED_TOOLNAME_REPLY
+        return BLOCKED_LEAK_REPLY
     return BLOCKED_LEAK_REPLY
 
 
@@ -512,52 +542,47 @@ def review(
     #    no "dollars" beside it ("your share is 5244") passes. Every tool
     #    formats money with a `$`, so that is unnatural phrasing rather than an
     #    easy road, and figures spelled as words were always beyond a regex.
-    money = allowed_money(envelopes, user_text)
+    # Every check runs, and every problem is collected — not just the first one.
+    # The retry gets ONE correction, so if a reply breaks two rules (invents a
+    # figure AND names a tool, which is exactly what happened when asked to move a
+    # raffle), a correction that mentioned only the figure sent the model back to
+    # fix that, name the tool again, and hit a second, terminal block. The admin
+    # then saw "I cannot share my instructions" as the answer to "can I move the
+    # raffle?". Now the one correction lists everything wrong at once.
     unverified = [
         token for token in _MONEY_SHAPED.findall(_LIST_MARKER.sub(" ", text))
-        if _canon(token) not in money
+        if _canon(token) not in allowed_money(envelopes, user_text)
     ]
-
-    if unverified:
-        return Verdict(
-            ok=False, reply=_message_for(FIGURES, wrote),
-            stripped_think=stripped, unverified=unverified, cause=FIGURES,
-        )
-
-    # 3. A surviving think tag means the pair was malformed in a way the two
-    #    patterns above could not consume. Refuse rather than guess which half
-    #    was reasoning and which was answer.
-    if _ANY_THINK_TAG.search(text):
-        return Verdict(
-            ok=False, reply=_message_for(REASONING, wrote),
-            stripped_think=True, prompt_leak=True, cause=REASONING,
-        )
-
-    # 4. Naming a tool hands over the map of the controls — and, seen in the
-    #    wild, an example call with real ids in it.
+    surviving_think = bool(_ANY_THINK_TAG.search(text))
     named = [n for n in _tool_names() if n in lowered_for_tools(text)]
-    if named:
-        return Verdict(
-            ok=False, reply=_message_for(INTERNALS, wrote),
-            stripped_think=stripped, prompt_leak=True,
-            cause=INTERNALS, disclosed=named,
-        )
+    quoted = [c for c in _PROMPT_CANARIES if c in text.lower()]
+    has_code = bool(_CODE_FENCE.search(text))
 
-    # 5. A verbatim fragment of the system prompt is an extraction, full stop.
-    lowered = text.lower()
-    quoted = [c for c in _PROMPT_CANARIES if c in lowered]
-    if quoted:
-        return Verdict(
-            ok=False, reply=_message_for(INTERNALS, wrote),
-            stripped_think=stripped, prompt_leak=True,
-            cause=INTERNALS, disclosed=["its own instructions"],
-        )
+    # Everything the model should not have said, for the correction and the
+    # "why" panel — a tool name is disclosure even when a worse problem is what
+    # decides the message shown to her.
+    disclosed = list(named) + (["its own instructions"] if quoted else [])
 
-    # 6. A code block means it has stopped being the bookkeeper.
-    if _CODE_FENCE.search(text):
-        return Verdict(
-            ok=False, reply=_message_for(OFF_DOMAIN, wrote),
-            stripped_think=stripped, cause=OFF_DOMAIN,
-        )
+    # The message she sees is driven by the WORST problem present, in order of
+    # damage: a wrong figure she might act on, then leaked reasoning, then a
+    # revealed tool/prompt, then off-domain output.
+    if unverified:
+        cause = FIGURES
+    elif surviving_think:
+        cause = REASONING
+    elif named or quoted:
+        cause = INTERNALS
+    elif has_code:
+        cause = OFF_DOMAIN
+    else:
+        return Verdict(ok=True, reply=text, stripped_think=stripped)
 
-    return Verdict(ok=True, reply=text, stripped_think=stripped)
+    return Verdict(
+        ok=False,
+        reply=_message_for(cause, wrote, disclosed),
+        stripped_think=stripped or cause == REASONING,
+        prompt_leak=cause in (REASONING, INTERNALS),
+        unverified=unverified,
+        cause=cause,
+        disclosed=disclosed,
+    )
