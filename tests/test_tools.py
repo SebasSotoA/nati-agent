@@ -813,3 +813,37 @@ def test_the_loan_book_names_whose_money_funded_each_loan(con, ctx) -> None:
             assert loan["lender"] != loan["member"], (
                 f"loan {loan['loan_id']} says {loan['member']} funded their own loan"
             )
+
+
+def test_the_loan_book_totals_what_it_returns(con, ctx) -> None:
+    """A total the answer obviously needs must come from the tool, or it is summed.
+
+    Filtered to personal loans, the only totals here were the fund's — $0 by
+    construction — so "give me my personal loans status" had no total in the
+    result and the model added the four balances itself, reaching $1,699 and $199.
+    Both were arithmetically right and both were suppressed, because no tool
+    returned them. The rule cannot soften: the same model computed $494 for a
+    $470 balance an hour earlier.
+    """
+    for money_from in ("personal", "fund", None):
+        args = {} if money_from is None else {"money_from": money_from}
+        env = registry.dispatch(con, "list_loans", args, ctx).for_the_model
+        active = [l for l in env["loans"] if l["status"] == "active"]
+        assert env["owed_total"] == sum(l["balance"] for l in active)
+        assert env["interest_charged_total"] == \
+            sum(l["interest_charged"] for l in env["loans"])
+        assert env["interest_outstanding_total"] == \
+            sum(l["interest_outstanding"] for l in active)
+
+
+def test_every_total_the_loan_book_states_is_speakable_as_money(con, ctx) -> None:
+    """Returning a total is not enough: it has to be TAGGED as money, or the
+    filter will still suppress the sentence that reports it."""
+    from nati.agent import egress
+
+    env = registry.dispatch(
+        con, "list_loans", {"money_from": "personal"}, ctx).for_the_model
+    allowed = egress.allowed_money([env], "")
+    for key in ("owed_total", "interest_charged_total",
+                "interest_outstanding_total", "interest_paid_total"):
+        assert str(env[key]) in allowed, f"{key} is not money-speakable"

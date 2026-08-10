@@ -473,13 +473,35 @@ def list_loans(
 
     if not listed:
         return ok("There are no loans matching that.", loans=[], count=0)
+
+    # Totals ACROSS WHAT WAS RETURNED, not just across the fund. Filter the book
+    # to personal loans and the only totals here used to be the fund's — which
+    # are $0 by construction — so "what am I owed in total?" had no answer in the
+    # result and the model added the four balances up itself. Its sum was right
+    # that time. It cannot be relied on to be: the same model computed
+    # $470 + $24 = $494 an hour earlier, which was wrong by exactly the $24 it
+    # had already counted. The filter cannot tell those apart, and should not have
+    # to — a total the answer obviously needs is the tool's job to provide.
+    active = [l for l in listed if l["status"] == "active"]
+    owed_total = sum(l["balance"] for l in active)
     interest_paid_total = sum(l["interest_paid"] for l in listed)
+    interest_charged_total = sum(l["interest_charged"] for l in listed)
+    interest_outstanding_total = sum(l["interest_outstanding"] for l in active)
     return ok(
-        f"There are {len(listed)} loans. The fund is still owed {usd(total)}, "
-        f"and {usd(interest_paid_total)} of interest has been paid across them.",
+        f"There are {len(listed)} loans, {len(active)} of them active and owing "
+        f"{usd(owed_total)} in total. The fund is still owed {usd(total)}, and "
+        f"{usd(interest_paid_total)} of interest has been paid across them.",
         loans=listed,
         count=len(listed),
+        active_count=len(active),
+        owed_total=figures.money("owed_total", owed_total),
         owed_to_the_fund=figures.money("owed_to_the_fund", total),
+        interest_charged_total=figures.money(
+            "interest_charged_total", interest_charged_total
+        ),
+        interest_outstanding_total=figures.money(
+            "interest_outstanding_total", interest_outstanding_total
+        ),
         interest_paid_total=figures.money(
             "interest_paid_total", interest_paid_total
         ),
