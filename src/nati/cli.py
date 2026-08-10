@@ -231,10 +231,16 @@ def cmd_seed(args: argparse.Namespace) -> int:
 
 def cmd_fund(args: argparse.Namespace) -> int:
     """Shows the fund. Useful for seeing the arithmetic without the model."""
+    from nati import clock
     from nati.world import db
     from nati.world import queries as q
 
-    upto = args.date
+    # Default to the real date, the same one the chat agent uses. These used to
+    # default to the seeded cut-off, which made the CLI and the agent disagree
+    # about what day it was: a payment recorded through the chat was invisible to
+    # `nati fund` and `nati payout` for as long as the seed date stayed in the
+    # past. --date is still there for asking "how did this look on <day>".
+    upto = args.date or clock.today_iso()
     con = db.connect()
     try:
         f = q.fund(con, upto)
@@ -285,14 +291,16 @@ def cmd_fund(args: argparse.Namespace) -> int:
 
 def cmd_payout(args: argparse.Namespace) -> int:
     """Simulates the year-end payout. Moves nothing."""
+    from nati import clock
     from nati.world import db
     from nati.world import queries as q
 
+    upto = args.date or clock.today_iso()   # the real date, as the agent sees it
     con = db.connect()
     try:
-        p = q.payout(con, args.date)
+        p = q.payout(con, upto)
 
-        t = Table(title=f"Simulated payout as of {args.date}", title_style="bold")
+        t = Table(title=f"Simulated payout as of {upto}", title_style="bold")
         t.add_column("member", overflow="fold")
         t.add_column("saved", justify="right")
         t.add_column("profit", justify="right")
@@ -325,7 +333,7 @@ def cmd_payout(args: argparse.Namespace) -> int:
             "\n[dim]Profits are split equally. Savings belong to each person.[/dim]"
         )
 
-        check = q.payout_balance_check(con, args.date)
+        check = q.payout_balance_check(con, upto)
         _line(OK if check.ok else FAIL, "Balances", check.text)
         if p.cash_is_enough:
             _line(OK, "Cash is enough", f"available {_usd(p.cash_available)}")
@@ -468,17 +476,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_seed)
 
     f = sub.add_parser("fund", help="The state of the common fund (no model needed).")
-    f.add_argument("--date", default=config.WORLD_TODAY, help="Cut-off date.")
+    f.add_argument("--date", default=None, help="Cut-off date (default: today).")
     f.set_defaults(func=cmd_fund)
 
     o = sub.add_parser("payout", help="Simulate the year-end payout.")
-    o.add_argument("--date", default=config.WORLD_TODAY, help="Cut-off date.")
+    o.add_argument("--date", default=None, help="Cut-off date (default: today).")
     o.set_defaults(func=cmd_payout)
 
     t = sub.add_parser("tools", help="List the tools, or run one by hand.")
     t.add_argument("--run", "-r", default=None, help="Tool name.")
     t.add_argument("--args", "-a", default=None, help='Arguments as JSON: \'{"month":7}\'')
-    t.add_argument("--date", default=config.WORLD_TODAY, help="Freeze 'today'.")
+    t.add_argument("--date", default=None,
+                   help="Freeze 'today' for this call (default: the real date).")
     t.set_defaults(func=cmd_tools)
 
     v = sub.add_parser("serve", help="Start the web chat (talk to Nati in a browser).")
