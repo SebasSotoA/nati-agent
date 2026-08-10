@@ -42,6 +42,34 @@ _FILTER_SAID = {
 }
 
 
+def _collapse_starts(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop each `start` row that is immediately followed by its own outcome.
+
+    The loop reports a tool twice on purpose — once when it is CALLED and once
+    when it ANSWERS — because a streaming caller needs the first to show
+    progress. This response is not streamed: the whole turn arrives at once, so
+    both rows land together and one successful call renders as two identical
+    lines.
+
+    That is not a cosmetic problem in this application. Two rows reading
+    "used record_payment" is indistinguishable from a payment recorded twice,
+    which is the very first thing anyone checks in a set of books — and it was
+    reported as exactly that. The audit log had one payment row; the chat had
+    two lines.
+
+    A `start` with nothing after it is KEPT. That happens only when the turn
+    died mid-tool, and dropping it would hide the attempt completely.
+    """
+    kept: list[dict[str, Any]] = []
+    for index, step in enumerate(steps):
+        if step.get("status") == "start":
+            nxt = steps[index + 1] if index + 1 < len(steps) else None
+            if nxt and nxt.get("status") != "start" and nxt.get("name") == step["name"]:
+                continue
+        kept.append(step)
+    return kept
+
+
 class _Conversation:
     """One conversation's in-memory state."""
 
@@ -186,7 +214,7 @@ def create_app(profile_name: str | None = None):
         return JSONResponse({
             "conv_id": conv.conv_id,
             "reply": reply,
-            "steps": steps,
+            "steps": _collapse_starts(steps),
             "ok": ok,
         })
 

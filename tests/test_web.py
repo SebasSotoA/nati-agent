@@ -143,3 +143,70 @@ def test_the_endpoint_rejects_a_hostile_conv_id() -> None:
     source = INDEX.parent.parent.joinpath("server.py").read_text(encoding="utf-8")
     assert "valid_conv_id" in source, "the endpoint does not validate conv_id"
     assert "Invalid conversation id" in source
+
+
+# --------------------------------------------------------------------------
+# One tool call is one row
+# --------------------------------------------------------------------------
+
+from nati.server import _collapse_starts as _collapse  # noqa: E402
+
+
+def test_a_completed_tool_call_renders_as_one_step() -> None:
+    """REPORTED AS A DOUBLE PAYMENT, and it was not one.
+
+    The loop reports a tool twice on purpose — once when it is called, once when
+    it answers — so a streaming caller can show progress. This response is not
+    streamed, so both rows arrived together and a single successful call read as
+    two identical "used record_payment" lines. The audit log had one payment row
+    and one loan-closure row; the chat had two lines that looked like two
+    payments. In a set of books that is the worst possible thing to get wrong.
+    """
+    steps = [
+        {"name": "record_payment", "status": "start", "message": "", "debug": None},
+        {"name": "record_payment", "status": "ok", "message": "Done.", "debug": None},
+    ]
+    assert [s["status"] for s in _collapse(steps)] == ["ok"]
+
+
+def test_a_refusal_keeps_its_own_row() -> None:
+    steps = [
+        {"name": "record_saving", "status": "start", "message": "", "debug": None},
+        {"name": "record_saving", "status": "refused", "message": "no",
+         "debug": {"reason": "name_mismatch"}},
+    ]
+    collapsed = _collapse(steps)
+    assert [(s["name"], s["status"]) for s in collapsed] == [
+        ("record_saving", "refused")]
+    assert collapsed[0]["debug"]["reason"] == "name_mismatch"
+
+
+def test_a_tool_that_never_answered_still_shows() -> None:
+    """A `start` with no outcome means the turn died mid-tool. Dropping it would
+    hide the attempt entirely, so it is kept."""
+    steps = [
+        {"name": "fund_status", "status": "start", "message": "", "debug": None},
+    ]
+    assert [s["status"] for s in _collapse(steps)] == ["start"]
+
+
+def test_several_tools_in_one_turn_each_collapse_once() -> None:
+    steps = [
+        {"name": "members", "status": "start", "message": "", "debug": None},
+        {"name": "members", "status": "ok", "message": "", "debug": None},
+        {"name": "record_payment", "status": "start", "message": "", "debug": None},
+        {"name": "record_payment", "status": "ok", "message": "", "debug": None},
+        {"name": "output filter", "status": "blocked", "message": "…", "debug": {}},
+    ]
+    assert [(s["name"], s["status"]) for s in _collapse(steps)] == [
+        ("members", "ok"), ("record_payment", "ok"), ("output filter", "blocked")]
+
+
+def test_a_start_is_not_swallowed_by_a_different_tool() -> None:
+    """Only its OWN outcome collapses a start."""
+    steps = [
+        {"name": "record_payment", "status": "start", "message": "", "debug": None},
+        {"name": "fund_status", "status": "ok", "message": "", "debug": None},
+    ]
+    assert [(s["name"], s["status"]) for s in _collapse(steps)] == [
+        ("record_payment", "start"), ("fund_status", "ok")]
