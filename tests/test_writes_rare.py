@@ -183,11 +183,10 @@ def test_a_fund_loan_is_recorded(con, ctx) -> None:
 
 
 def test_a_personal_loan_carries_the_warning(con, ctx) -> None:
-    # Whose money must be named: several members lend privately.
+    # Personal money is always the administrator's — no lender needs naming.
     result = confirmed(con, ctx, "record_loan", member_id=2,
                        confirm_name=member(con, 2), amount=200,
-                       monthly_rate=3, money_from="personal",
-                       lender_member_id=1)
+                       monthly_rate=3, money_from="personal")
     env = result.for_the_model
     assert env["ok"] is True
     loan = con.execute(
@@ -197,35 +196,33 @@ def test_a_personal_loan_carries_the_warning(con, ctx) -> None:
     assert any("own money" in w for w in env.get("warnings", []))
 
 
-def test_a_personal_loan_must_say_whose_money_it_is(con, ctx) -> None:
-    """Interest on a personal loan belongs to that person alone, so with several
-    private lenders the tool may never guess which pocket it came from."""
-    ambiguous = call(con, ctx, "record_loan", member_id=2,
-                     confirm_name=member(con, 2), amount=200,
-                     monthly_rate=3, money_from="personal")
-    assert ambiguous.for_the_model["ok"] is False
-    assert ambiguous.reason == "ambiguous_lender"
+def test_a_personal_loan_is_always_the_administrators(con, ctx) -> None:
+    """Only the administrator lends privately, so 'personal' takes no lender
+    argument and can never be attributed to the wrong pocket — it is always hers.
 
-    # Someone who does not lend privately cannot fund one either.
-    not_a_lender = call(con, ctx, "record_loan", member_id=2,
-                        confirm_name=member(con, 2), amount=200,
-                        monthly_rate=3, money_from="personal",
-                        lender_member_id=9)
-    assert not_a_lender.for_the_model["ok"] is False
-    assert not_a_lender.reason == "not_a_lender"
-
-    # Named correctly, the loan lands against THAT person's lender row.
-    lender_member = 10          # Sebastian Soto lends his own money
+    This replaces the old ambiguity handling: there used to be several private
+    lenders, so the tool refused ('ambiguous_lender') unless told whose money it
+    was. With one private pocket, that whole question is gone.
+    """
     done = confirmed(con, ctx, "record_loan", member_id=2,
                      confirm_name=member(con, 2), amount=200,
-                     monthly_rate=3, money_from="personal",
-                     lender_member_id=lender_member)
+                     monthly_rate=3, money_from="personal")
     assert done.for_the_model["ok"] is True
+
+    # The loan lands against the administrator's lender row.
+    admin_member_id = int(con.execute(
+        "SELECT value FROM settings WHERE key = 'admin_member_id'"
+    ).fetchone()[0])
     row = con.execute(
         """SELECT le.member_id FROM loans l JOIN lenders le ON le.id = l.lender_id
             WHERE l.id = ?""", (done.for_the_model["loan_id"],)
     ).fetchone()
-    assert int(row["member_id"]) == lender_member
+    assert int(row["member_id"]) == admin_member_id
+
+    # And there is exactly one personal lender to attribute to.
+    assert con.execute(
+        "SELECT COUNT(*) FROM lenders WHERE kind = 'personal'"
+    ).fetchone()[0] == 1
 
 
 def test_the_fund_cannot_lend_more_cash_than_it_has(con, ctx) -> None:
@@ -248,8 +245,7 @@ def test_a_voided_loan_cannot_be_resourced(con, ctx) -> None:
 
     recreated = call(con, ctx, "record_loan", member_id=2,
                      confirm_name=member(con, 2), amount=200,
-                     monthly_rate=3, money_from="personal",
-                     lender_member_id=1)
+                     monthly_rate=3, money_from="personal")
     assert recreated.for_the_model["ok"] is False
     assert recreated.reason == "resourced_loan"
 
@@ -599,8 +595,7 @@ def test_resourcing_is_refused_even_with_a_different_amount_or_date(con, ctx) ->
     for tweak in ({}, {"amount": 1001}, {"date": "2026-08-03"},
                   {"monthly_rate": 9}):
         attempt = call(con, ctx, "record_loan",
-                       **{**base, "money_from": "personal",
-                          "lender_member_id": 1, **tweak})
+                       **{**base, "money_from": "personal", **tweak})
         assert attempt.for_the_model["ok"] is False, f"resourced via {tweak}"
         assert attempt.reason == "resourced_loan"
 
@@ -730,8 +725,7 @@ def test_resourcing_is_refused_across_month_boundaries(con, ctx) -> None:
 
     for when in ("2026-08-01", "2026-07-28", "2026-06-15", "2026-01-20"):
         attempt = call(con, ctx, "record_loan",
-                       **{**base, "money_from": "personal",
-                          "lender_member_id": 1, "date": when})
+                       **{**base, "money_from": "personal", "date": when})
         assert attempt.for_the_model["ok"] is False, f"re-sourced via {when}"
         assert attempt.reason == "resourced_loan"
 

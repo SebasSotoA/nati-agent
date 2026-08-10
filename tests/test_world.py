@@ -65,13 +65,12 @@ def _insert_ticket(con, **kw):
 
 def test_the_world_builds_from_the_seed(con: sqlite3.Connection) -> None:
     assert _count(con, "members") == 29
-    # The fund plus everyone who lends privately: the administrator and the
-    # five engineers, each of whom is also a member.
-    assert _count(con, "lenders") == 7
+    # Two money sources only: the common fund, and the administrator's own money.
+    assert _count(con, "lenders") == 2
     personal = con.execute(
         "SELECT COUNT(*) FROM lenders WHERE kind = 'personal'"
     ).fetchone()[0]
-    assert personal == 6
+    assert personal == 1
     assert con.execute(
         "SELECT COUNT(*) FROM lenders WHERE kind = 'fund'"
     ).fetchone()[0] == 1
@@ -557,6 +556,29 @@ def test_personal_capital_does_not_leave_the_funds_cash(
     assert personal > 0
     assert f.capital_out == fund_only
     assert f.capital_out < fund_only + personal
+
+
+def test_there_is_exactly_one_private_pocket_the_administrator(
+    con: sqlite3.Connection,
+) -> None:
+    """The domain has two money sources: the fund and the administrator's own
+    money. So there is exactly one 'personal' lender, it is the administrator,
+    and every personal loan is hers — no ambiguity about whose money it is."""
+    lenders = con.execute(
+        "SELECT id, kind, member_id FROM lenders ORDER BY id"
+    ).fetchall()
+    assert [(r["id"], r["kind"]) for r in lenders] == [(0, "fund"), (1, "personal")]
+
+    admin_member_id = int(con.execute(
+        "SELECT value FROM settings WHERE key = 'admin_member_id'"
+    ).fetchone()[0])
+    assert int(lenders[1]["member_id"]) == admin_member_id
+
+    # Every personal loan points at that one lender row.
+    other = con.execute(
+        "SELECT COUNT(*) FROM loans WHERE lender_id != 0 AND lender_id != 1"
+    ).fetchone()[0]
+    assert other == 0
 
 
 def test_the_funds_cash_does_not_double_count_interest(

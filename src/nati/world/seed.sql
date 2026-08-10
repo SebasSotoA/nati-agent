@@ -12,7 +12,7 @@
 -- ---------- MEMBERS (29) ----------
 -- Everyone joins at the start of the cycle: nobody joins once it is running.
 INSERT INTO members (id, name, phone, joined_on) VALUES
-  (1, 'Maria Lopez', '3101234567', '2026-01-05'),
+  (1, 'Beatriz Angel', '3101234567', '2026-01-05'),
   (2, 'Carlos Ramirez', '3102345678', '2026-01-05'),
   (3, 'Luz Marina Gomez', '3103456789', '2026-01-05'),
   (4, 'Adrian Rivera', '3104567890', '2026-01-05'),
@@ -43,23 +43,18 @@ INSERT INTO members (id, name, phone, joined_on) VALUES
   (29, 'Liliana Andrea Toro', '3129012345', '2026-01-05');
 
 -- ---------- LENDERS ----------
--- id 0 = the common fund. Every other row is a person lending THEIR OWN
--- money: that interest is theirs, not the group's, and never enters the
--- payout. Several people lend privately, so a personal loan must always
--- name whose money it was - it can never be inferred.
+-- Exactly two money sources. id 0 = the common fund. id 1 = the
+-- administrator's OWN money: that interest is hers, not the group's, and
+-- never enters the payout. Only the administrator lends privately, so a
+-- personal loan is always hers.
 INSERT INTO lenders (id, name, kind, member_id) VALUES
   (0, 'Natillera Fund', 'fund', NULL),
-  (1, 'Maria Lopez (personal)', 'personal', 1),
-  (2, 'Adrian Rivera (personal)', 'personal', 4),
-  (3, 'Christian Cardenas (personal)', 'personal', 6),
-  (4, 'Sebastian Soto (personal)', 'personal', 10),
-  (5, 'Henry Jaramillo (personal)', 'personal', 13),
-  (6, 'Alonso Suarez (personal)', 'personal', 22);
+  (1, 'Beatriz Angel (personal)', 'personal', 1);
 
 -- ---------- SETTINGS (dated; never overwritten) ----------
 INSERT INTO settings (key, value, effective_from, note) VALUES
   ('cycle_year', '2026', '2026-01-01', 'Current cycle'),
-  ('admin_member_id', '1', '2026-01-01', 'Maria Lopez is the administrator'),
+  ('admin_member_id', '1', '2026-01-01', 'Beatriz Angel is the administrator'),
   ('cycle_first_month', '1', '2026-01-01', 'January'),
   ('cycle_last_month', '11', '2026-01-01', 'November; December is for the shopping'),
   ('monthly_ticket_price', '10', '2026-01-01', 'Monthly raffle fee per member'),
@@ -246,7 +241,8 @@ INSERT INTO savings (member_id, date, amount) VALUES
 
 -- ---------- LOANS ----------
 -- Interest is charged on the ORIGINAL amount, flat, until paid off.
--- Loans 4 and 7 are funded from Maria's own money (lender 1).
+-- Loans 4, 7, 10 and 11 are funded from the administrator's own money
+-- (lender 1); the rest are the common fund's (lender 0).
 INSERT INTO loans (id, member_id, lender_id, principal,
                    monthly_rate, started_on, status) VALUES
   (1, 2, 0, 500, 3, '2026-03-01', 'active'),
@@ -258,8 +254,8 @@ INSERT INTO loans (id, member_id, lender_id, principal,
   (7, 18, 1, 600, 4, '2026-04-18', 'active'),
   (8, 21, 0, 350, 3, '2026-06-01', 'voided'),
   (9, 24, 0, 150, 0, '2026-06-10', 'active'),
-  (10, 7, 4, 300, 3, '2026-05-08', 'active'),
-  (11, 12, 6, 200, 4, '2026-06-22', 'active');
+  (10, 7, 1, 300, 3, '2026-05-08', 'active'),
+  (11, 12, 1, 200, 4, '2026-06-22', 'active');
 
 -- ---------- LOAN_INTEREST (accrued at month end) ----------
 INSERT INTO loan_interest (loan_id, date, interest_amount) VALUES

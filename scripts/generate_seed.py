@@ -49,11 +49,11 @@ QUARTERLY_TICKET_PRICE = 20
 QUARTERLY_PRIZE = 250
 QUARTERLY_MONTHS = (3, 6, 9)        # the seeded ones falling before the cutoff
 
-ADMIN_ID = 1                        # Maria Lopez, the administrator
+ADMIN_ID = 1                        # Beatriz Angel, the administrator
 
 # 29 members. Names and phone numbers are synthetic.
 MEMBERS: list[tuple[str, str, str]] = [
-    ("Maria Lopez",        "3101234567", "2026-01-05"),
+    ("Beatriz Angel",      "3101234567", "2026-01-05"),
     ("Carlos Ramirez",     "3102345678", "2026-01-05"),
     ("Luz Marina Gomez",   "3103456789", "2026-01-05"),
     ("Adrian Rivera",      "3104567890", "2026-01-05"),
@@ -98,32 +98,23 @@ UNPAID_TICKETS: set[tuple[int, str, int]] = {
     (19, "quarterly", 6),                       # Nubia owes the quarterly
 }
 
-# Personal lenders beyond the administrator: (lender_id, member_id).
-# The five engineers on the team are members AND lend privately, which is what
-# makes the fund/personal boundary something each of them has skin in.
-PERSONAL_LENDERS: list[tuple[int, int]] = [
-    (2, 4),    # Adrian Rivera
-    (3, 6),    # Christian Cardenas
-    (4, 10),   # Sebastian Soto
-    (5, 13),   # Henry Jaramillo
-    (6, 22),   # Alonso Suarez
-]
-
 # Loans: (member_id, lender_id, principal, rate%, started_on, status)
-# lender 0 = the common fund; 1 = Maria's own money; 2..6 = a teammate's own.
+# lender 0 = the common fund; 1 = the administrator's own money. Those are the
+# ONLY two sources: the administrator makes both the fund's loans and any loans
+# from her own pocket. Nobody else lends privately.
 # Every rate divides exactly at this scale, so no new rounding is introduced.
 LOANS: list[tuple[int, int, int, int, str, str]] = [
     (2,  0,   500, 3, "2026-03-01", "active"),   # Carlos, has payments
-    (4,  0, 1_000, 4, "2026-02-10", "active"),   # Jose: owes more than his share
+    (4,  0, 1_000, 4, "2026-02-10", "active"),   # Adrian: owes more than his share
     (5,  0,   300, 3, "2026-04-05", "closed"),   # Ana: paid off exactly
-    (6,  1,   400, 5, "2026-05-20", "active"),   # Diego: MARIA'S OWN MONEY
-    (10, 0,   800, 3, "2026-03-15", "active"),   # Wilmar
-    (13, 0,   250, 2, "2026-05-02", "active"),   # Beatriz, low rate
-    (18, 1,   600, 4, "2026-04-18", "active"),   # Julian: MARIA'S OWN MONEY
+    (6,  1,   400, 5, "2026-05-20", "active"),   # Christian: ADMIN'S OWN MONEY
+    (10, 0,   800, 3, "2026-03-15", "active"),   # Sebastian
+    (13, 0,   250, 2, "2026-05-02", "active"),   # Henry, low rate
+    (18, 1,   600, 4, "2026-04-18", "active"),   # Julian: ADMIN'S OWN MONEY
     (21, 0,   350, 3, "2026-06-01", "voided"),   # Monica: recorded in error
     (24, 0,   150, 0, "2026-06-10", "active"),   # Ruben: no interest, valid
-    (7,  4,   300, 3, "2026-05-08", "active"),   # Rosa owes SEBASTIAN'S own money
-    (12, 6,   200, 4, "2026-06-22", "active"),   # Oscar owes ALONSO'S own money
+    (7,  1,   300, 3, "2026-05-08", "active"),   # Rosa owes the ADMIN'S own money
+    (12, 1,   200, 4, "2026-06-22", "active"),   # Oscar owes the ADMIN'S own money
 ]
 
 # Payments: (loan_id, member_id, date, amount)
@@ -192,17 +183,14 @@ def generate() -> str:
 
     # ---------------- lenders ----------------
     w("-- ---------- LENDERS ----------")
-    w("-- id 0 = the common fund. Every other row is a person lending THEIR OWN")
-    w("-- money: that interest is theirs, not the group's, and never enters the")
-    w("-- payout. Several people lend privately, so a personal loan must always")
-    w("-- name whose money it was - it can never be inferred.")
+    w("-- Exactly two money sources. id 0 = the common fund. id 1 = the")
+    w("-- administrator's OWN money: that interest is hers, not the group's, and")
+    w("-- never enters the payout. Only the administrator lends privately, so a")
+    w("-- personal loan is always hers.")
+    admin_name = MEMBERS[ADMIN_ID - 1][0]
     w("INSERT INTO lenders (id, name, kind, member_id) VALUES")
     w(f"  {_row([0, 'Natillera Fund', 'fund', None])},")
-    rows = [f"  {_row([1, 'Maria Lopez (personal)', 'personal', ADMIN_ID])}"]
-    for lender_id, member_id in PERSONAL_LENDERS:
-        name = f"{MEMBERS[member_id - 1][0]} (personal)"
-        rows.append(f"  {_row([lender_id, name, 'personal', member_id])}")
-    w(",\n".join(rows) + ";")
+    w(f"  {_row([1, f'{admin_name} (personal)', 'personal', ADMIN_ID])};")
     w("")
 
     # ---------------- settings ----------------
@@ -211,7 +199,7 @@ def generate() -> str:
     cfg = [
         ("cycle_year", str(YEAR), "2026-01-01", "Current cycle"),
         ("admin_member_id", str(ADMIN_ID), "2026-01-01",
-         "Maria Lopez is the administrator"),
+         "Beatriz Angel is the administrator"),
         ("cycle_first_month", str(FIRST_MONTH), "2026-01-01", "January"),
         ("cycle_last_month", str(LAST_MONTH), "2026-01-01",
          "November; December is for the shopping"),
@@ -247,7 +235,8 @@ def generate() -> str:
     # ---------------- loans ----------------
     w("-- ---------- LOANS ----------")
     w("-- Interest is charged on the ORIGINAL amount, flat, until paid off.")
-    w("-- Loans 4 and 7 are funded from Maria's own money (lender 1).")
+    w("-- Loans 4, 7, 10 and 11 are funded from the administrator's own money")
+    w("-- (lender 1); the rest are the common fund's (lender 0).")
     w("INSERT INTO loans (id, member_id, lender_id, principal,")
     w("                   monthly_rate, started_on, status) VALUES")
     rows = [

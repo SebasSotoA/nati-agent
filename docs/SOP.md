@@ -91,14 +91,15 @@ is no tool to close a loan. **HARD**
 
 ## C. The fund / personal-money boundary
 
-This is the most important section. The administrator — and five of the members —
-sometimes lend **their own money** instead of the fund's. Interest on a person's own
-money is theirs alone; interest on the fund's money belongs to all 29 members. Confusing
-the two is taking from somebody.
+This is the most important section. There are exactly two sources of money: the common
+fund, and the **administrator's own money**. Every loan is made by the administrator —
+either she lends the group's money, or she lends her own. Interest on her own money is
+hers alone; interest on the fund's money belongs to all 29 members. Confusing the two is
+taking from somebody.
 
-Because more than one person lends privately, **whose money funded a loan can never be
-inferred — it must be stated.** A loan recorded as personal without naming the lender is
-refused outright rather than attributed to a guess.
+**Whose money funded a loan is fixed when the loan is created and can never be changed.**
+A loan is either the fund's or the administrator's; there is no third pocket, and the two
+are never merged, swapped, or reclassified afterwards.
 
 **C1** — Every loan records who funded it, and **that can never be changed**. A
 misrecorded loan is annulled and recreated, leaving both records visible. **HARD**
@@ -107,7 +108,7 @@ misrecorded loan is annulled and recreated, leaving both records visible. **HARD
 cash, the fund's profits, or the year-end distribution. **HARD**
 
 **C3** — When Nati reports a member's debt, it must state separately how much is owed to
-the fund and how much is owed to an individual lender personally. Reporting only the fund figure
+the fund and how much is owed to the administrator personally. Reporting only the fund figure
 would tell a member they owe nothing when they owe money. **HARD** (the field is always
 present) / **SOFT** (Nati must actually say it)
 

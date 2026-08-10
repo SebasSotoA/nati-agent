@@ -349,7 +349,7 @@ def test_interest_cannot_be_backdated_behind_a_payment(con, ctx) -> None:
     turn1 = db.Ctx(conv_id="regress", seq=1, turn=1)
     turn2 = db.Ctx(conv_id="regress", seq=1, turn=2)
     args = dict(member_id=2, confirm_name="Carlos Ramirez", amount=1000,
-                monthly_rate=5, money_from="personal", lender_member_id=1,
+                monthly_rate=5, money_from="personal",
                 date="2026-02-01")
     token = registry.dispatch(con, "record_loan", args, turn1).for_the_model["token"]
     confirm.delivered(token, 1)     # the loop marks this when the turn ends

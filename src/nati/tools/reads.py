@@ -162,21 +162,12 @@ def member_status(
 
     warnings: list[str] = []
     if owes_personal:
-        # Name the actual lender. Several members lend privately, so saying "the
-        # administrator" here was a false statement in the one field whose whole
-        # purpose is keeping the two pockets apart.
-        lenders_owed = ", ".join(
-            row["lender"] for row in con.execute(
-                """SELECT DISTINCT le.name AS lender
-                     FROM loans l JOIN lenders le ON le.id = l.lender_id
-                    WHERE l.member_id = ? AND l.lender_id != ?
-                      AND l.status != 'voided' AND l.started_on <= ?""",
-                (mid, FUND_ID, upto),
-            )
-        )
+        # Personal money is always the administrator's — she is the only private
+        # lender — so this is unambiguous. The point of the warning is the one
+        # that always mattered: this debt is NOT owed to the common fund.
         warnings.append(
-            f"Of that debt, {usd(owes_personal)} is owed on private money "
-            f"({lenders_owed}), not to the common fund."
+            f"Of that debt, {usd(owes_personal)} is owed to the administrator "
+            "personally, on her own money — not to the common fund."
         )
 
     return ok(
@@ -417,18 +408,14 @@ def list_loans(
             "member": row["name"],
             "member_id": int(row["member_id"]),
             "money_from": "fund" if from_fund else "personal",
-            # WHOSE money. "personal" alone is not an answer to the sharpest rule
-            # in this domain, and leaving it out cost a real one: asked to split
+            # WHOSE money — "personal" always means the administrator's own
+            # money. Leaving the name out once cost a real answer: asked to split
             # the loan book by source, the model reported that Julian Marin's loan
-            # came from "his own money". Julian is the BORROWER; Maria Lopez
-            # funded it. The tool had said `personal` and nothing else, so the
-            # model filled the gap with the only name in the row.
-            #
-            # Nothing downstream catches that. The output filter judges figures,
-            # and this is a name — so a wrong lender travels all the way to her,
-            # about the one fact the SOP says can never be inferred, only stated.
-            # `loan_status` and `member_status` always named it; the loan book,
-            # which is where anyone actually asks "fund or personal?", did not.
+            # came from "his own money". Julian is the BORROWER, not the lender.
+            # The tool had said `personal` and nothing else, so the model filled
+            # the gap with the only name in the row. Nothing downstream catches
+            # that — the output filter judges figures, and this is a name — so the
+            # funder is stated here rather than inferred.
             "lender": row["lender"],
             "status": row["status"],
             "principal": figures.money(f"l{lid}_principal", int(row["principal"])),

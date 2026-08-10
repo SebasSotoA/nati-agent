@@ -171,7 +171,7 @@ def test_no_tool_message_reveals_the_control(con, ctx) -> None:
     attempts = [
         ("record_saving", dict(member_id=2, confirm_name="Rosa", amount=100)),
         ("record_saving", dict(member_id=999, confirm_name="X", amount=100)),
-        ("record_saving", dict(member_id=True, confirm_name="Maria", amount=100)),
+        ("record_saving", dict(member_id=True, confirm_name="Beatriz", amount=100)),
         ("record_saving", dict(member_id=2, confirm_name="Carlos", amount=0.5)),
         ("record_saving", dict(member_id=2, confirm_name="Carlos",
                                amount=100, date="2026-12-01")),
@@ -241,7 +241,7 @@ def test_the_thousands_separator_is_the_us_one(con, ctx) -> None:
 
 def test_member_id_true_is_not_member_one(con, ctx) -> None:
     r = call(con, ctx, "record_saving",
-             member_id=True, confirm_name="Maria Lopez", amount=100)
+             member_id=True, confirm_name="Beatriz Angel", amount=100)
     assert r.for_the_model["ok"] is False
 
 
@@ -330,28 +330,27 @@ def test_member_status_separates_personal_debt(con, ctx) -> None:
     body = r.for_the_model
     assert body["personal_debt_not_part_of_the_fund"] > 0
     warning = " ".join(body["warnings"])
-    assert "private money" in warning
-    assert row["lender"] in warning, f"the lender is not named: {warning!r}"
+    # Personal money is always the administrator's, so the warning names her
+    # rather than picking among several private lenders.
+    assert "administrator" in warning
+    assert "her own money" in warning
     assert "not to the common fund" in warning
 
 
-def test_a_private_lender_is_never_mistaken_for_the_administrator(con, ctx) -> None:
-    """A member borrowing from a teammate must not be told they owe the admin."""
-    admin = con.execute(
-        "SELECT name FROM lenders WHERE id = 1"
-    ).fetchone()["name"]
+def test_a_personal_debt_is_flagged_as_owed_to_the_administrator(con, ctx) -> None:
+    """A member owing on personal money must be told it is owed to the
+    administrator, not to the common fund — that is the whole point of the split
+    (C3). With one private pocket the attribution is unambiguous."""
     row = con.execute(
-        """SELECT l.member_id, le.name AS lender FROM loans l
-             JOIN lenders le ON le.id = l.lender_id
-            WHERE l.lender_id NOT IN (0, 1) AND l.status = 'active' LIMIT 1"""
+        """SELECT member_id FROM loans
+            WHERE lender_id = 1 AND status = 'active' LIMIT 1"""
     ).fetchone()
-    if row is None:
-        pytest.skip("no loan from a non-administrator private lender")
+    assert row is not None, "the seed must contain a personal loan"
     body = call(con, ctx, "member_status",
                 member_id=int(row["member_id"])).for_the_model
     warning = " ".join(body["warnings"])
-    assert row["lender"] in warning
-    assert admin not in warning, f"credited the administrator instead: {warning!r}"
+    assert "administrator" in warning
+    assert "not to the common fund" in warning
 
 
 def test_every_loan_says_where_the_money_came_from(con, ctx) -> None:
@@ -797,10 +796,10 @@ def test_the_loan_book_names_whose_money_funded_each_loan(con, ctx) -> None:
     reports the fund/personal split must also say WHOSE.
 
     Asked to split the loan book by source, the model reported that Julian Marin's
-    loan came from "his own money". Julian is the borrower; Maria Lopez funded it.
-    `list_loans` had said `personal` and nothing more, so the model supplied the
-    only name it had. No later layer catches that: the output filter judges
-    figures, and a lender is a name.
+    loan came from "his own money". Julian is the borrower; the administrator
+    funded it. `list_loans` had said `personal` and nothing more, so the model
+    supplied the only name it had. No later layer catches that: the output filter
+    judges figures, and a lender is a name.
     """
     env = registry.dispatch(con, "list_loans", {}, ctx).for_the_model
     for loan in env["loans"]:

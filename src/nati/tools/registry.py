@@ -325,15 +325,8 @@ TOOLS: tuple[Tool, ...] = (
                 "money_from": {
                     "type": "string", "enum": ["fund", "personal"],
                     "description": "fund = the natillera's common money; "
-                                   "personal = one particular person's own money.",
-                },
-                "lender_member_id": {
-                    "type": "integer",
-                    "description": "Required when money_from is 'personal': the "
-                                   "member number of the person whose OWN money "
-                                   "is being lent. Several members lend "
-                                   "privately, and their interest belongs to "
-                                   "them alone, so it can never be guessed.",
+                                   "personal = the administrator's own money "
+                                   "(she is the only one who lends privately).",
                 },
                 "date": _DATE,
                 "confirm_token": _CONFIRM_TOKEN,
@@ -343,7 +336,7 @@ TOOLS: tuple[Tool, ...] = (
         lambda con, ctx, **kw: writes_rare.record_loan(
             con, ctx, kw.get("member_id"), kw.get("confirm_name"),
             kw.get("amount"), kw.get("monthly_rate"), kw.get("money_from"),
-            kw.get("date"), kw.get("lender_member_id"), kw.get("confirm_token"),
+            kw.get("date"), kw.get("confirm_token"),
         ),
         writes=True,
     ),

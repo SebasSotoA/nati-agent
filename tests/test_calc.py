@@ -22,7 +22,7 @@ from nati.tools.calc import Movement as M
         (500, 3, 15),      # loan 1 in the seed
         (1_000, 4, 40),    # loan 2
         (300, 3, 9),       # loan 3
-        (400, 5, 20),      # loan 4 (Maria's own money)
+        (400, 5, 20),      # loan 4 (the administrator's own money)
         (800, 3, 24),      # loan 5
         (250, 2, 5),       # loan 6
         (600, 4, 24),      # loan 7

@@ -115,10 +115,10 @@ raffle tickets.
 Deliberate tension: cash would fall short of a full payout today, because money
 is out on loan.
 
-**The sharpest rule:** six people lend their *own* money alongside the fund.
-Interest on private money belongs to that person alone and must never enter the
-fund or the payout. Whose money funded a loan is fixed at creation and **can
-never be inferred — only stated.**
+**The sharpest rule:** there are two money sources — the common fund, and the
+administrator's *own* money. Every loan is one or the other. Interest on her own
+money is hers alone and must never enter the fund or the payout. Whose money
+funded a loan is fixed at creation and **can never be changed.**
 
 ## Scope
 

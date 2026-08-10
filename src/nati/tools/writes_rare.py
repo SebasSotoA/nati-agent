@@ -119,49 +119,32 @@ def add_member(
 # --------------------------------------------------------------------------
 
 
-def _personal_lender(
-    con: sqlite3.Connection, lender_member_id: object = None
-) -> sqlite3.Row:
-    """Whose private money funds a loan. Named explicitly, never inferred.
+def _personal_lender(con: sqlite3.Connection) -> sqlite3.Row:
+    """The administrator's own-money lender row.
 
-    Several people in this natillera lend privately, not just the administrator.
-    Interest on a personal loan belongs to that person alone and never enters the
-    fund or the payout, so putting it in the wrong pocket is taking from someone.
-    Guessing is therefore not an option: if more than one person lends and the
-    caller has not said which, this refuses.
+    There are exactly two money sources: the common fund, and the
+    administrator's own pocket. Only the administrator lends privately, so
+    "personal" is never ambiguous and needs no lender argument — this returns her
+    lender row, identified by the `admin_member_id` setting rather than by
+    guessing. Interest on her private loans is hers alone and never enters the
+    fund or the payout.
     """
-    rows = con.execute(
+    admin_member_id = q.setting_int(con, "admin_member_id", clock.today_iso(), 0)
+    row = con.execute(
         """SELECT le.id, le.name, le.member_id, m.name AS member_name
              FROM lenders le JOIN members m ON m.id = le.member_id
-            WHERE le.kind = 'personal' ORDER BY le.id"""
-    ).fetchall()
-    if not rows:
+            WHERE le.kind = 'personal' AND le.member_id = ?""",
+        (admin_member_id,),
+    ).fetchone()
+    if row is None:
+        # The seed always sets this up; this guards a mis-seeded world rather
+        # than any reachable request.
         raise gates.Refusal(
             "no_personal_lender",
-            "Nobody here is set up to lend their own money, so I cannot record "
-            "that.",
+            "The administrator's own-money account is not set up, so I cannot "
+            "record a personal loan.",
         )
-
-    if lender_member_id not in (None, ""):
-        wanted = gates.integer(lender_member_id, "lender")
-        for row in rows:
-            if int(row["member_id"]) == wanted:
-                return row
-        raise gates.Refusal(
-            "not_a_lender",
-            "That person does not lend their own money through the natillera, "
-            "so a loan cannot be funded from them.",
-        )
-
-    if len(rows) == 1:
-        return rows[0]
-
-    who = ", ".join(r["member_name"] for r in rows)
-    raise gates.Refusal(
-        "ambiguous_lender",
-        "Several people lend their own money, so I need you to tell me whose "
-        f"money this loan is: {who}.",
-    )
+    return row
 
 
 def record_loan(
@@ -173,7 +156,6 @@ def record_loan(
     monthly_rate: object,
     money_from: object,
     when: object = None,
-    lender_member_id: object = None,
     confirm_token: object = None,
 ) -> dict[str, Any]:
     """Creates a loan. Whose money funds it is decided HERE and never changes."""
@@ -193,7 +175,7 @@ def record_loan(
     if source == "fund":
         lender_id, lender_name = FUND_ID, "the fund"
     else:
-        lender = _personal_lender(con, lender_member_id)
+        lender = _personal_lender(con)
         lender_id, lender_name = int(lender["id"]), lender["member_name"]
 
     # Re-sourcing a voided loan — void as fund, recreate as personal — is how the
