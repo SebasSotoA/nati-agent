@@ -499,6 +499,22 @@ entered the allowlist. Both sides now use one pattern, and a test asserts that w
 `review` is willing to call money, `allowed_money` harvests. This is the second time a
 guard and its allowlist drifted apart; the first was the numeral check in item 3.
 
+It happened again immediately, from the other side. She wrote *"Sebastian just payed 900"* —
+a **bare** number, which the money pattern deliberately does not match. `record_payment`
+refused the amount as larger than the balance, and the sentence that explains that refusal
+must name the figure, so it was suppressed too. The rule is now simply **anything she typed,
+she may hear back**: `allowed_money` harvests every numeral from her messages, not only the
+money-shaped ones. Field-binding still applies in full to tool envelopes, which is where its
+rationale actually lives — her prose contains no raffle-number set for a figure to hide
+among. `allowed_numbers` had always trusted her text this way; the money allowlist now
+agrees with it. The laundering path stays shut because the retry correction is a `system`
+message and `conversation_context` reads `role == "user"` only — asserted end to end.
+
+Worth recording what the same live run showed about the retry: the model's first attempt at
+that reply stated **$430**, having computed 900 − 470 itself. That is a real fabrication, it
+was suppressed, and the second attempt was correct and reached her. The mechanism earns its
+keep — the failures above were the allowlist being wrong, not the check being unnecessary.
+
 **7. A refusal she cannot diagnose is a refusal she cannot trust.** The blocked-reply
 sentences are deliberately vague — "an amount I could not verify" never says *which*
 amount — which made a false positive indistinguishable from a real catch without opening

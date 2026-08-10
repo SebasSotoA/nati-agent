@@ -518,3 +518,54 @@ def test_an_amount_no_one_mentioned_is_still_caught() -> None:
     assert not verdict.ok
     assert verdict.cause == egress.FIGURES
     assert "$4,231" in verdict.unverified
+
+
+def test_her_bare_figure_can_be_quoted_back() -> None:
+    """The second half of the same bug, and the one she hit.
+
+    She wrote "Sebastian just payed 900" — no `$`, no "usd", so the money pattern
+    does not match it. `record_payment` then refused the amount as larger than the
+    balance, and the sentence that EXPLAINS that refusal has to name the figure.
+    It was suppressed as a fabrication and she got the generic message.
+    """
+    her = "Sebastian just payed 900"
+    refusal = {"ok": False,
+               "message": "That payment is more than what is left to pay on that loan."}
+    verdict = egress.review(
+        "That is more than what is left on his loan, so I have not recorded "
+        "the $900.", [refusal], her)
+    assert verdict.ok, verdict.unverified
+
+
+def test_a_number_she_typed_is_speakable_as_money_however_she_wrote_it() -> None:
+    for spelling in ("900", "$900", "900 usd", "900 dollars", "USD 900"):
+        allowed = egress.allowed_money([], f"Sebastian just payed {spelling}")
+        assert "900" in allowed, f"{spelling!r} did not reach the money allowlist"
+
+
+def test_the_model_still_cannot_invent_a_figure_she_never_mentioned() -> None:
+    """The widening must not blunt the check. Nothing here supplies 4231."""
+    verdict = egress.review(
+        "After that he still owes $4,231.", [], "Sebastian just payed 900")
+    assert not verdict.ok
+    assert verdict.cause == egress.FIGURES
+    assert "$4,231" in verdict.unverified
+
+
+def test_a_figure_cannot_be_laundered_through_the_correction() -> None:
+    """The correction is a `system` message and the allowlist reads `user` only.
+
+    Asserted end to end rather than by inspection: build the history the loop
+    would, and confirm the invented amount is still absent from the allowlist.
+    """
+    verdict = egress.review("Your share is $9,999.", [], "what is my share?")
+    assert not verdict.ok
+    history = [
+        {"role": "system", "content": "prompt"},
+        {"role": "user", "content": "what is my share?"},
+        {"role": "assistant", "content": "Your share is $9,999."},
+        {"role": "system", "content": verdict.correction("what is my share?")},
+    ]
+    envelopes, said = egress.conversation_context(history)
+    assert "9999" not in egress.allowed_money(envelopes, said)
+    assert not egress.review("Your share is $9,999.", envelopes, said).ok

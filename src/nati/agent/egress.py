@@ -372,6 +372,26 @@ def allowed_money(
     formats it with a `$`, so the manifest itself carries the distinction. Raffle
     numbers, member ids, months and counts go through `Figures.number()` and are
     speakable as themselves — never as dollars.
+
+    That field-binding applies to ENVELOPES ONLY. Every number the administrator
+    typed is money-speakable, whatever spelling she used, because her message is
+    prose and not a structured result: there is no raffle-number set in it for a
+    figure to hide among, which is the entire reason field-binding exists. She
+    wrote *"Sebastian just payed 900"*, a bare number the money pattern does not
+    match; the tool then refused the payment as too large; and the model could not
+    say *"that is more than is left, so I did not record the $900"* — the one
+    sentence that explains the refusal — because her own figure was not on the
+    allowlist. She got the generic message instead. `allowed_numbers` has always
+    trusted her text this way; this makes the money allowlist agree with it.
+
+    The residue: mention "member 23" and the model may say "$23" unrebuked. That
+    is a wrong figure she supplied, not an invented one, and this filter exists to
+    catch the model making numbers up. Blocking her own arithmetic broke ordinary
+    work twice.
+
+    Note the correction the filter feeds back on a retry is a `system` message,
+    and `conversation_context` harvests `role == "user"` only — so a figure the
+    model invented cannot be laundered onto this list by being quoted back at it.
     """
     allowed: set[str] = set()
 
@@ -391,7 +411,8 @@ def allowed_money(
 
     for env in envelopes:
         scan(env)
-    for token in _money_tokens(user_text):
+    # Anything she typed, she may hear back — as money or otherwise.
+    for token in _number_tokens(user_text):
         allowed.add(_canon(token))
     return allowed
 
