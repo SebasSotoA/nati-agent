@@ -64,7 +64,7 @@ Inspect the whole world with **no model involved**:
 uv run nati tools                                        # all 19 + arguments
 uv run nati tools -r member_status -a '{"member_id": 2}'  # run one by hand
 uv run nati fund && uv run nati payout                   # the books, balanced
-uv run pytest -q                                         # 416 tests, no network
+uv run pytest -q                                         # 421 tests, no network
 ```
 
 ## Traces

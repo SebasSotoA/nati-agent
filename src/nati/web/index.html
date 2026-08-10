@@ -134,7 +134,7 @@
   .why > summary:hover { opacity: 1; }
   .why-body { margin: 4px 0 0 14px; display: flex; flex-direction: column;
               gap: 3px; color: var(--muted); }
-  .why-body b { color: var(--fg); font-weight: 600; opacity: .75; }
+  .why-body b { color: var(--ink); font-weight: 600; opacity: .75; }
   .why-body pre {
     margin: 3px 0 0; padding: 7px 9px; border-radius: 6px; white-space: pre-wrap;
     word-break: break-word; background: var(--step-bg, rgba(127,127,127,.10));
@@ -390,10 +390,6 @@ const store = {
     }
   },
 
-  clear() {
-    try { localStorage.removeItem(this.KEY); } catch {}
-    try { localStorage.removeItem(this.OLD); } catch {}
-  },
 };
 
 function newLocalId() {

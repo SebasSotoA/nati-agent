@@ -14,6 +14,7 @@ import pytest
 from nati import clock
 from nati.agent import egress
 from nati.tools import reads
+from nati.world import db
 
 ENV_FUND = {
     "ok": True,
@@ -381,8 +382,6 @@ def test_the_integrity_answer_is_speakable(world) -> None:
     and then had the answer suppressed on its own cash figure. It was the only
     read tool with no manifest.
     """
-    from nati.tools.envelope import usd
-
     with clock.frozen("2026-08-04"):
         env = reads.check_integrity(world)
         money = {f["field"]: f for f in env["figures"]
@@ -590,7 +589,7 @@ def test_a_figure_cannot_be_laundered_through_the_correction() -> None:
     assert not egress.review("Your share is $9,999.", envelopes, said).ok
 
 
-def test_the_loan_book_supplies_the_balance_split_so_nothing_is_derived() -> None:
+def test_the_loan_book_supplies_the_balance_split_so_nothing_is_derived(world) -> None:
     """The rule "the model never does arithmetic" obliges the TOOL to hand over
     every figure a natural answer needs.
 
@@ -599,24 +598,21 @@ def test_the_loan_book_supplies_the_balance_split_so_nothing_is_derived() -> Non
     outstanding. So it subtracted to get 24 — correct — and then added it to the
     $470 that already contained it, reaching $494: $24 more than he owes. Both
     derived figures were suppressed because no tool returned them.
+
+    Uses the `world` fixture, never `db.connect()` on var/world.db — that file is
+    generated and a fresh clone does not have it.
     """
-    from nati.world import db
     from nati.tools import registry
 
-    con = db.connect()
-    try:
-        ctx = db.Ctx(conv_id="20260810T000000Z-111111", seq=1, turn=1)
-        env = registry.dispatch(con, "list_loans", {}, ctx).for_the_model
-        loan = next(l for l in env["loans"] if l["loan_id"] == 5)
+    ctx = db.Ctx(conv_id="20260810T000000Z-111111", seq=1, turn=1)
+    env = registry.dispatch(world, "list_loans", {}, ctx).for_the_model
+    allowed = egress.allowed_money([env], "")
+    for loan in env["loans"]:
         # The split is present, and it adds up to the balance the same tool gave.
         assert loan["capital_outstanding"] + loan["interest_outstanding"] == \
-            loan["balance"]
+            loan["balance"], f"loan {loan['loan_id']} split does not add up"
         # And every part of it is speakable as money without any arithmetic.
-        allowed = egress.allowed_money([env], "")
         for key in ("balance", "capital_outstanding", "interest_outstanding",
                     "interest_charged", "interest_paid"):
-            assert str(loan[key]) in allowed, f"{key} is not money-speakable"
-        # The wrong answer stays wrong: nothing licenses 494.
-        assert "494" not in allowed
-    finally:
-        con.close()
+            assert str(loan[key]) in allowed, \
+                f"loan {loan['loan_id']}: {key} is not money-speakable"

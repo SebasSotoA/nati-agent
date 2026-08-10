@@ -165,7 +165,7 @@ def run_turn(
 
         try:
             turn = complete(history, registry.schemas(), profile)
-        except ProviderError as exc:
+        except ProviderError:
             tracer.conv_end("provider_error", {"model_calls": call_index})
             yield Failure(
                 "I could not reach the model just now. Please try again in a moment."
