@@ -362,11 +362,19 @@ def test_a_blocked_reply_gets_one_retry_and_a_real_answer(con, tracer, monkeypat
     corrections = [m for m in history
                    if m["role"] == "system" and "NOT sent" in str(m["content"])]
     assert len(corrections) == 1
-    # It must NOT quote the invented figure: the correction is a message in the
-    # conversation, and figures the administrator types are trusted, so repeating
-    # it back would launder it onto the allowlist.
-    assert "214.20" not in corrections[0]["content"]
+    # It NAMES the invented figure, so the model knows which of several amounts
+    # to drop. Told only that "an amount" was wrong it hedged, was blocked again,
+    # and she got a fixed apology to a question that had a good answer.
+    #
+    # Naming it is safe because of the role, not because of the wording: the
+    # allowlist is built from `role == "user"` messages only, so a `system`
+    # correction cannot launder the figure back into being speakable. That is the
+    # property, and it is asserted rather than assumed.
+    assert "214.20" in corrections[0]["content"]
     assert "no tool returned" in corrections[0]["content"]
+    envelopes, said = egress.conversation_context(history)
+    assert "214.20" not in egress.allowed_money(envelopes, said)
+    assert not egress.review("He owes $214.20.", envelopes, said).ok
     # And it repeats her question, so the model cannot lose it.
     assert "Henry" in corrections[0]["content"]
 

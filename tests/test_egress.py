@@ -424,18 +424,37 @@ def test_every_read_tool_can_state_its_own_money(world) -> None:
 
 
 def test_the_correction_cannot_launder_a_figure() -> None:
-    """The retry text becomes a message in the conversation, and figures the
-    administrator types are trusted — so if the correction quoted the invented
-    amount, restating it would then pass. It must not name the number."""
+    """The correction NAMES the invented amount, and that is safe only because of
+    the ROLE it goes in under.
+
+    It used to be appended as a `user` message, where quoting the figure put it on
+    the allowlist and restating it then passed. It is now a `system` message and
+    `conversation_context` harvests `role == "user"` only. So the protection is
+    structural, and this asserts the structure rather than the wording — the
+    earlier version of this test asserted the text did not contain the number,
+    which forbade the very thing that makes a retry useful.
+
+    The role is therefore load-bearing. It is pinned separately by
+    `test_a_blocked_reply_gets_one_retry_and_a_real_answer`, which fails if the
+    loop ever appends this as a user turn again.
+    """
     with clock.frozen("2026-08-04"):
         first = egress.review("It comes to $91,234 all told.", [], "")
         assert not first.ok and first.cause == egress.FIGURES
 
         correction = first.correction()
-        assert "91,234" not in correction and "91234" not in correction
+        assert "91,234" in correction, "the model cannot tell which figure to drop"
 
-        # Saying it again, with the correction now in the conversation, still fails.
-        again = egress.review("It comes to $91,234 all told.", [], correction)
+        # The history the loop actually builds: the correction is a SYSTEM message.
+        history = [
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "how much is it worth?"},
+            {"role": "assistant", "content": "It comes to $91,234 all told."},
+            {"role": "system", "content": correction},
+        ]
+        envelopes, said = egress.conversation_context(history)
+        assert "91234" not in egress.allowed_money(envelopes, said)
+        again = egress.review("It comes to $91,234 all told.", envelopes, said)
     assert not again.ok, "the correction laundered the figure onto the allowlist"
 
 

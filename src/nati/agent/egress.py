@@ -200,8 +200,10 @@ def _collect_scalars(value: Any, into: set[str]) -> None:
 
 BLOCKED_REPLY = (
     "I wrote an answer that included figures I could not verify against the "
-    "books, so I have not sent it. Ask me again and I will check the exact "
-    "numbers with my tools."
+    "books, so I have not sent it — I would rather give you nothing than a "
+    "number you might act on. Ask me for the figure on its own and I will read "
+    "it straight from the books: for a loan I can give you the balance and how "
+    "much of it is capital and how much is interest."
 )
 
 # Used when a write DID land this turn. The generic message says "I have not
@@ -269,24 +271,34 @@ class Verdict:
             if question.strip() else ""
         )
         if self.cause == FIGURES:
-            # The offending amounts are deliberately NOT quoted here. This text
-            # becomes a message in the conversation, and figures the
-            # administrator types are trusted — so repeating the invented number
-            # back would ADD it to the allowlist, and restating it would then
-            # pass. The model can already see its own previous reply, so naming
-            # the count is enough.
-            n = len(self.unverified)
-            which = "an amount" if n == 1 else f"{n} amounts"
+            # The offending amounts ARE named now. They deliberately were not,
+            # because this text used to be appended as a `user` message and
+            # figures the administrator types are trusted — so quoting the
+            # invented number back added it to the allowlist and restating it
+            # then passed. That laundering path closed when the correction became
+            # a `system` message: `conversation_context` harvests `role == "user"`
+            # only, which a test asserts end to end.
+            #
+            # Naming them matters. Told only that "an amount" was wrong, the model
+            # cannot tell which of five figures to drop, so it hedged, was blocked
+            # again, and the administrator got a fixed apology for a question that
+            # had a perfectly good answer. Told that $24 and $494 are the problem,
+            # it can restate the two figures it was actually handed.
+            quoted = ", ".join(dict.fromkeys(self.unverified))
+            which = (f"stated {quoted}, which no tool returned in this "
+                     "conversation" if quoted else
+                     "stated an amount that no tool returned in this conversation")
             return (
                 "Your previous reply was NOT sent to the administrator. It "
-                f"stated {which} that no tool returned in this conversation. "
-                "Answer the question again using only amounts you have actually "
-                "been given. Do not calculate, estimate, or round anything "
-                "yourself. If you are missing a figure, either fetch it or say "
-                "plainly that you do not have it — and say that in her words, "
-                "describing what is missing, NOT by naming a tool, a field or a "
-                "function. Naming one is itself a reason the reply will be "
-                "withheld, so do not explain where your numbers came from." + asked
+                f"{which}. Answer the question again using only amounts you have "
+                "actually been given, and leave those ones out. Do not calculate, "
+                "estimate, add, subtract or round anything yourself — if a total "
+                "or a difference was not handed to you, you do not have it. "
+                "Either fetch what you are missing or say plainly that you do not "
+                "have it, in her words, describing what is missing and NOT by "
+                "naming a tool, a field or a function. Naming one is itself a "
+                "reason the reply will be withheld, so do not explain where your "
+                "numbers came from." + asked
             )
         if self.cause == INTERNALS:
             named = ", ".join(self.disclosed[:4])
