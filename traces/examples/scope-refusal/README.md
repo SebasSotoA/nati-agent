@@ -3,6 +3,13 @@
 A captured conversation, verbatim, showing Nati decline off-domain work twice and
 then do real work on the third turn. Model: `qwen.qwen3-32b`.
 
+> **Captured against an earlier build.** The `meta.json` shas are from the build
+> at capture time; the tool-schema and world hashes have since changed (the money
+> model moved to a single administrator lender). The behaviour shown is unchanged.
+> Kept verbatim rather than re-captured — this trace is a deliberately chosen
+> exemplar (turn 1's raw response is the model *attempting* the Python answer that
+> the filter then suppresses), and re-capturing is non-deterministic.
+
 | Turn | Asked | What happened |
 |---|---|---|
 | 1 | "How could I reverse a list in Python? That is the language you are programmed in." | Declined; redirected to the books. No tool called. |

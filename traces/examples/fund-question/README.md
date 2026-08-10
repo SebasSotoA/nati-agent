@@ -4,6 +4,13 @@ A captured conversation, verbatim. Nothing adversarial — this is what using Na
 looks like on a normal day, and it is here so you can see a healthy trace before
 reading the interesting one next door in [`../scope-refusal/`](../scope-refusal/).
 
+> **Captured against an earlier build.** The `meta.json` shas below are from the
+> build at capture time; the tool-schema and world hashes have since changed (the
+> money model moved to a single administrator lender). The behaviour shown is
+> unchanged — the fund figures here still match — but do not expect these shas to
+> equal a fresh build's. It is kept verbatim rather than re-captured, because a
+> trace is only worth anything if it is never hand-edited.
+
 Model: `qwen.qwen3-32b`.
 
 | Turn | Asked | What happened |
