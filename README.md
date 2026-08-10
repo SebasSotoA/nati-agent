@@ -36,7 +36,7 @@ Each rule sits at the strongest layer that can hold it:
 | Strongest | **the argument does not exist** — payments take no `member_id`, so crediting the wrong person is unsayable |
 | Very strong | **DB triggers / CHECKs** — a loan's funder never changes; nothing is ever deleted |
 | Strong | **one write chokepoint** — `db.insert`/`db.update`, which also writes the audit row |
-| Medium | **tool gates + tokens** — the 6 dangerous tools need a token spendable only in a *later* turn |
+| Medium | **tool gates + tokens** — the 6 dangerous tools need a token spendable only in the turn *after* she was shown the summary |
 | On the way out | **the output filter** — refuses a dollar amount no tool returned, a tool name, leaked reasoning |
 | Weakest | **the prompt** |
 
@@ -52,9 +52,9 @@ audited too, not just successes.
 ## The 19 tools
 
 **8 read** · **5 daily write** (one call) · **6 rare write** (two-phase: the
-first call returns a summary and a token; the write lands only when that token
-comes back in a later turn, which is what makes the administrator's confirmation
-mechanically necessary).
+first call returns a summary and a token, and the write lands only when that
+token comes back in the turn *after* the summary actually reached her — which is
+what makes her confirmation mechanically necessary rather than merely expected).
 
 **Deliberately absent:** no delete, edit, un-void, un-pay, or payout tool.
 
