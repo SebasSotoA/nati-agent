@@ -790,3 +790,26 @@ def test_the_loan_book_answers_interest_in_one_result(con, ctx) -> None:
     for loan in body["loans"]:
         for field in ("interest_charged", "interest_paid", "capital_repaid"):
             assert str(loan[field]) in money, f"{field} is not money-tagged"
+
+
+def test_the_loan_book_names_whose_money_funded_each_loan(con, ctx) -> None:
+    """C-series. Whose money funded a loan is the sharpest rule in the domain and
+    the SOP says it can never be inferred, only stated — so every tool that
+    reports the fund/personal split must also say WHOSE.
+
+    Asked to split the loan book by source, the model reported that Julian Marin's
+    loan came from "his own money". Julian is the borrower; Maria Lopez funded it.
+    `list_loans` had said `personal` and nothing more, so the model supplied the
+    only name it had. No later layer catches that: the output filter judges
+    figures, and a lender is a name.
+    """
+    env = registry.dispatch(con, "list_loans", {}, ctx).for_the_model
+    for loan in env["loans"]:
+        assert loan.get("lender"), f"loan {loan['loan_id']} does not name its funder"
+        if loan["money_from"] == "fund":
+            assert loan["lender"] == "Natillera Fund"
+        else:
+            # A personal loan names a person, and never the borrower themselves.
+            assert loan["lender"] != loan["member"], (
+                f"loan {loan['loan_id']} says {loan['member']} funded their own loan"
+            )

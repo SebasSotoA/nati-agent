@@ -399,8 +399,10 @@ def list_loans(
     listed, total = [], 0
     for row in con.execute(
         f"""SELECT l.id, l.member_id, l.lender_id, l.principal,
-                   l.monthly_rate, l.status, m.name
-              FROM loans l JOIN members m ON m.id = l.member_id
+                   l.monthly_rate, l.status, m.name, le.name AS lender
+              FROM loans l
+              JOIN members m ON m.id = l.member_id
+              JOIN lenders le ON le.id = l.lender_id
              WHERE {' AND '.join(where)}
              ORDER BY l.id""",  # noqa: S608
         tuple(params),
@@ -415,6 +417,19 @@ def list_loans(
             "member": row["name"],
             "member_id": int(row["member_id"]),
             "money_from": "fund" if from_fund else "personal",
+            # WHOSE money. "personal" alone is not an answer to the sharpest rule
+            # in this domain, and leaving it out cost a real one: asked to split
+            # the loan book by source, the model reported that Julian Marin's loan
+            # came from "his own money". Julian is the BORROWER; Maria Lopez
+            # funded it. The tool had said `personal` and nothing else, so the
+            # model filled the gap with the only name in the row.
+            #
+            # Nothing downstream catches that. The output filter judges figures,
+            # and this is a name — so a wrong lender travels all the way to her,
+            # about the one fact the SOP says can never be inferred, only stated.
+            # `loan_status` and `member_status` always named it; the loan book,
+            # which is where anyone actually asks "fund or personal?", did not.
+            "lender": row["lender"],
             "status": row["status"],
             "principal": figures.money(f"l{lid}_principal", int(row["principal"])),
             "monthly_rate": figures.number(f"l{lid}_rate", int(row["monthly_rate"])),
