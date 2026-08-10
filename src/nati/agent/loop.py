@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from nati.agent import egress
@@ -36,7 +36,7 @@ from nati.agent.prompt import system_prompt
 from nati.agent.tracer import Tracer
 from nati.config import Profile
 from nati.providers import ProviderError, complete
-from nati.tools import registry
+from nati.tools import confirm, registry
 from nati.world import db
 
 MAX_STEPS = 8  # model calls per user message; a loop backstop, not a normal limit
@@ -54,11 +54,19 @@ class Thinking:
 
 @dataclass
 class ToolStep:
-    """A tool was called. `status` is start | ok | refused | error."""
+    """A tool was called. `status` is start | ok | refused | error.
+
+    `reason` is the INTERNAL refusal code (`before_joining`, `nothing_owed`, …).
+    It is never sent to the model — that would let it enumerate the whole
+    taxonomy of controls — but the administrator debugging her own agent is not
+    the model, so it travels to the UI, where it is the fastest way to see which
+    guard fired.
+    """
 
     name: str
     status: str
     message: str = ""
+    reason: str = ""
 
 
 @dataclass
@@ -68,9 +76,18 @@ class Retrying:
     Surfaced so the administrator sees the control working instead of a longer
     silence — and so a teammate can tell "the filter caught something" apart from
     "the agent is broken".
+
+    The remaining fields exist because "held back an amount no tool had returned"
+    is unactionable on its own: it does not say WHICH amount, nor what the
+    allowlist held, so a false positive is indistinguishable from a real catch
+    without opening the trace. They are for the UI only and never reach the model.
     """
 
     cause: str
+    unverified: list[str] = field(default_factory=list)
+    disclosed: list[str] = field(default_factory=list)
+    allowed: list[str] = field(default_factory=list)
+    withheld: str = ""
 
 
 @dataclass
@@ -139,6 +156,10 @@ def run_turn(
     audit_seq = 0
     wrote_this_turn = False
     retried = False        # at most one correction per turn
+    # Confirmation requests raised during this turn. They only become spendable
+    # once she has actually been shown one, which is the moment this turn ends
+    # with a reply she can read — see the `Reply` branch below.
+    offered_tokens: list[str] = []
     for call_index in range(1, max_steps + 1):
         yield Thinking()
 
@@ -214,8 +235,23 @@ def run_turn(
                     "answer again",
                     author="egress",
                 )
-                yield Retrying(verdict.cause or "blocked")
+                yield Retrying(
+                    verdict.cause or "blocked",
+                    unverified=list(verdict.unverified),
+                    disclosed=list(verdict.disclosed),
+                    allowed=sorted(egress.allowed_money(envelopes, said)),
+                    withheld=turn.content or "",
+                )
                 continue
+
+            # The turn ends with something she can read. If it is the model's own
+            # words (not a suppressed reply replaced by a fixed sentence) then any
+            # confirmation summary raised this turn genuinely reached her, and its
+            # token becomes spendable in her NEXT message. A suppressed reply
+            # carries no summary, so it must not open the gate.
+            if verdict.ok:
+                for token in offered_tokens:
+                    confirm.delivered(token, user_turn)
 
             tracer.conv_end("reply", {"model_calls": call_index,
                                       "egress_ok": verdict.ok,
@@ -243,7 +279,8 @@ def run_turn(
                 }
                 tracer.tool_result(tc.name, ok=False, reason="unparsable_arguments",
                                    result=result, internal_error=tc.parse_error)
-                yield ToolStep(tc.name, "error", result["message"])
+                yield ToolStep(tc.name, "error", result["message"],
+                               reason="unparsable_arguments")
             else:
                 audit_seq += 1
                 tracer.tool_call(tc.name, tc.arguments or {})
@@ -258,8 +295,11 @@ def run_turn(
                     tc.name, ok=bool(result.get("ok")), reason=outcome.reason,
                     result=result, internal_error=outcome.internal_error,
                 )
+                if isinstance(result.get("token"), str):
+                    offered_tokens.append(result["token"])
                 status = "ok" if result.get("ok") else "refused"
-                yield ToolStep(tc.name, status, str(result.get("message", "")))
+                yield ToolStep(tc.name, status, str(result.get("message", "")),
+                               reason=outcome.reason or "")
 
             history.append({
                 "role": "tool",

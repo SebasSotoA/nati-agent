@@ -119,6 +119,26 @@
   .step.error .dot { background: var(--error); }
   .step .note { color: var(--muted); opacity: .8; }
 
+  /* "why" — the debug disclosure under a refused or suppressed step. Collapsed
+     by default so ordinary use stays quiet, and it carries the internal reason
+     code, which is deliberately never shown to the model. */
+  .why { font-size: 12px; font-family: ui-monospace, monospace;
+         margin: 1px 0 3px 14px; }
+  .why > summary { color: var(--muted); cursor: pointer; opacity: .75;
+                   list-style: none; }
+  .why > summary::-webkit-details-marker { display: none; }
+  .why > summary::before { content: "▸ "; }
+  .why[open] > summary::before { content: "▾ "; }
+  .why > summary:hover { opacity: 1; }
+  .why-body { margin: 4px 0 0 14px; display: flex; flex-direction: column;
+              gap: 3px; color: var(--muted); }
+  .why-body b { color: var(--fg); font-weight: 600; opacity: .75; }
+  .why-body pre {
+    margin: 3px 0 0; padding: 7px 9px; border-radius: 6px; white-space: pre-wrap;
+    word-break: break-word; background: var(--step-bg, rgba(127,127,127,.10));
+    max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.45;
+  }
+
   /* Typing indicator. */
   .typing { align-self: flex-start; display: flex; gap: 4px; padding: 12px; }
   .typing span {
@@ -461,9 +481,57 @@ function renderSteps(steps) {
       row.appendChild(note);
     }
     wrap.appendChild(row);
+    // A refusal or a suppressed reply gets a collapsed "why". The sentence she
+    // is shown is deliberately vague — "an amount no tool had returned" does not
+    // say WHICH amount — which makes a false positive indistinguishable from a
+    // real catch without opening the trace. This puts the specifics one click
+    // away.
+    if (s.debug) wrap.appendChild(debugPanel(s.debug));
   }
   log.appendChild(wrap);
   scrollDown();
+}
+
+// The debug disclosure. Built entirely from DOM nodes and textContent — every
+// value here crosses the wire, and the withheld draft is model-authored text, so
+// none of it may ever touch innerHTML.
+const DEBUG_LABELS = [
+  ["reason", "rule"],
+  ["unverified", "amounts it could not verify"],
+  ["allowed", "amounts a tool did return"],
+  ["disclosed", "internals it revealed"],
+];
+
+function debugPanel(d) {
+  const det = document.createElement("details");
+  det.className = "why";
+  const sum = document.createElement("summary");
+  sum.textContent = "why";
+  det.appendChild(sum);
+
+  const body = document.createElement("div");
+  body.className = "why-body";
+  for (const [key, label] of DEBUG_LABELS) {
+    const v = d[key];
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    const line = document.createElement("div");
+    const b = document.createElement("b");
+    b.textContent = label + ": ";
+    line.appendChild(b);
+    line.appendChild(document.createTextNode(
+      Array.isArray(v) ? v.join("  ") : String(v)));
+    body.appendChild(line);
+  }
+  if (d.withheld) {
+    const b = document.createElement("b");
+    b.textContent = "the reply that was not sent:";
+    const pre = document.createElement("pre");
+    pre.textContent = d.withheld;
+    body.append(b, pre);
+  }
+  det.appendChild(body);
+  return det;
 }
 
 function showTyping() {

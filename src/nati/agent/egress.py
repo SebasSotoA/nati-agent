@@ -69,13 +69,26 @@ _CODE_FENCE = re.compile(r"```|~~~")
 # model listing nineteen things had items 13-19 flagged as invented figures.
 _LIST_MARKER = re.compile(r"^[ \t]*\d{1,3}[.)](?=\s)", re.MULTILINE)
 
-# A figure written AS MONEY: "$1,234", or "1234 dollars" / "1234 USD". The only
-# numerals the filter judges.
+# A figure written AS MONEY: "$1,234", "USD 1234", or "1234 dollars" / "1234 USD".
+# The only numerals the filter judges.
+#
+# ONE definition, used by BOTH sides — what gets judged in a reply, and what gets
+# harvested into the allowlist from her messages and the tool results. They used
+# to differ: this pattern recognised three spellings while the allowlist harvester
+# kept only `$`-prefixed tokens. So "Sebastian just payed 900 usd" put nothing on
+# the allowlist, and the model echoing her own figure back as "$900" — the natural
+# thing to do — was judged a fabrication. She was refused twice and got the
+# generic message, for quoting her own number. Any widening here must stay in one
+# place for exactly that reason.
 _MONEY_SHAPED = re.compile(
     r"\$\s?\d[\d,]*(?:\.\d+)?"
+    r"|\b(?:usd|us\$)\s?\d[\d,]*(?:\.\d+)?"
     r"|\b\d[\d,]*(?:\.\d+)?(?=\s*(?:dollars?|usd)\b)",
     re.IGNORECASE,
 )
+# A currency marker written BEFORE the digits, so "$900", "USD 900" and "900 usd"
+# all canonicalize to the same "900".
+_CURRENCY_PREFIX = re.compile(r"^(?:usd|us\$|\$)\s*", re.IGNORECASE)
 
 
 def _tool_names() -> tuple[str, ...]:
@@ -120,8 +133,8 @@ _PROMPT_CANARIES = (
 
 
 def _canon(token: str) -> str:
-    """'$15,732' -> '15732';  '3%' -> '3';  '50.5' -> '50.5'."""
-    return token.strip().lstrip("$").rstrip("%").replace(",", "")
+    """'$15,732' -> '15732';  'USD 900' -> '900';  '3%' -> '3';  '50.5' -> '50.5'."""
+    return _CURRENCY_PREFIX.sub("", token.strip()).rstrip("%").replace(",", "")
 
 
 def _number_tokens(text: str) -> list[str]:
@@ -155,9 +168,13 @@ def lowered_for_tools(text: str) -> str:
 
 
 def _money_tokens(text: str) -> list[str]:
-    """Only the figures written AS money — '$1,234'. Dates/hashes removed first."""
+    """The figures written AS money. Dates/hashes removed first.
+
+    Uses the SAME pattern `review` judges with, so a figure the administrator
+    wrote in any accepted spelling is a figure the model may repeat back.
+    """
     rest = _HASH_LIKE.sub(" ", _ISO_DATE.sub(" ", text))
-    return [t for t in _NUMBER.findall(rest) if t.startswith("$")]
+    return _MONEY_SHAPED.findall(rest)
 
 
 def _collect_scalars(value: Any, into: set[str]) -> None:

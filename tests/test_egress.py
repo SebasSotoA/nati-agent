@@ -464,3 +464,57 @@ def test_but_a_price_still_has_to_be_looked_up() -> None:
         v = egress.review("A monthly ticket costs $20.", [], "")
     assert not v.ok
     assert v.cause == egress.FIGURES
+
+
+# --------------------------------------------------------------------------
+# The allowlist must accept money in every spelling the filter judges
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("wrote_it_as", ["900 usd", "900 USD", "900 dollars",
+                                         "$900", "USD 900", "usd900"])
+def test_a_figure_she_typed_can_be_repeated_back(wrote_it_as: str) -> None:
+    """The reported failure, and it was ours, not the model's.
+
+    `review` judged three spellings of money while the allowlist harvested only
+    `$`-prefixed ones. So "Sebastian just payed 900 usd" put nothing on the
+    allowlist, and the model echoing her own figure back as "$900" — which is
+    what asking a sensible clarifying question requires — was called a
+    fabrication. She was refused twice and handed the generic message.
+    """
+    said = f"Sebastian just payed {wrote_it_as}"
+    for spelling in ("$900", "900 USD", "900 dollars"):
+        verdict = egress.review(
+            f"Is that {spelling} a savings contribution or a loan repayment?",
+            [], said,
+        )
+        assert verdict.ok, (
+            f"she wrote {wrote_it_as!r}, the reply said {spelling!r}, "
+            f"unverified={verdict.unverified}"
+        )
+
+
+def test_the_allowlist_and_the_judge_use_one_pattern() -> None:
+    """Whatever `review` is willing to call money, `allowed_money` must harvest.
+
+    This is the invariant the bug broke, asserted directly so widening one side
+    without the other fails here rather than in her chat.
+    """
+    for spelling in ("$1,234", "1234 dollars", "1234 USD", "USD 1,234", "$1234.50"):
+        harvested = egress.allowed_money([], f"she paid {spelling}")
+        judged = egress.review(f"the amount is {spelling}", [], "")
+        assert judged.unverified, f"{spelling!r} is not judged as money at all"
+        assert harvested, f"{spelling!r} is judged but never harvested"
+        assert egress._canon(judged.unverified[0]) in harvested, (
+            f"{spelling!r} canonicalizes differently on each side: "
+            f"judged={judged.unverified} harvested={harvested}"
+        )
+
+
+def test_an_amount_no_one_mentioned_is_still_caught() -> None:
+    """The widening must not blunt the check it exists for."""
+    verdict = egress.review(
+        "After that he still owes $4,231.", [], "Sebastian just payed 900 usd")
+    assert not verdict.ok
+    assert verdict.cause == egress.FIGURES
+    assert "$4,231" in verdict.unverified

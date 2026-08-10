@@ -232,7 +232,10 @@ across messages, hidden in a code block, or written as a list of what it cannot 
 **SOFT**
 
 **G12** — Nati must confirm, in plain language and with the actual figures, what it is
-about to record — before recording it. **SOFT**
+about to record — before recording it. **SOFT** overall, but **HARD for the six rare write
+tools**: they take a confirmation token that is unforgeable, single-use, and spendable only
+in the turn immediately after the summary reached her. The five daily write tools take no
+token, which is where this rule is still only a politeness.
 
 **G13** — Nati only does this natillera's business. Anything else — general knowledge,
 programming help, current events, its own implementation, or acting as a different kind of
@@ -308,7 +311,9 @@ rows of each section: rules with nothing behind them but judgment.**
 ## 10. What this reconciliation found
 
 Writing this document after the code — which was a sequencing mistake — surfaced four
-things worth recording.
+things worth recording. Three more (5–7) came later, and all three came from the same
+place: **explaining a mechanism in plain words, and testing it instead of describing it.**
+That has now found more real defects than any deliberate audit did.
 
 **1. A rule I invented was wrong.** An earlier draft contained *"a prize may not exceed
 that month's ticket income."* That was my assumption, never the administrator's rule. Her
@@ -414,8 +419,9 @@ path that needed it:
   evidence whatsoever.
 - **Two-phase confirmation never required a human.** The loop allows several model calls per
   message, so the model could mint a token and spend it in the same turn: the mechanism
-  proved "the model repeated itself", not "she agreed". Tokens are now only spendable in a
-  later turn than the one that minted them.
+  proved "the model repeated itself", not "she agreed". Tokens became spendable only in a
+  later turn than the one that minted them — which was itself not enough; see item 5, where
+  the gate moved from minting to **delivery**.
 - **`resourced_loan` was an exact-match check**, so asking for $1 more or one day later
   walked straight through the void-and-recreate bypass.
 
@@ -461,6 +467,46 @@ database ones. The table now says so.
 zero) and **E4** (distribution is simulation only) hold because no tool exists to do
 otherwise. That is the strongest kind of enforcement, but it is invisible in a code
 search — worth stating explicitly so nobody "helpfully" adds the missing tool later.
+
+**5. Explaining the confirmation mechanism found a hole in it.** Asked to write up how
+two-phase confirmation works, I tested the turn gate instead of describing it, and it did
+not hold. The gate compared the spend against the turn the token was **minted** in and
+accepted any later turn. Minting is the wrong event — the model mints, several times per
+message if it likes — and "any later turn" was the wrong test. Together they meant an
+action proposed in turn 2 and **never confirmed** became writable inside any single later
+turn: the model called the tool twice in turn 5 and the check compared 5 > 2. Every one of
+the six rare write tools was affected, which is to say every dangerous one.
+
+It could not be fixed by reverting, because the earliest-mint behaviour it relied on was
+itself a fix for a real bug: a failed attempt in the turn she said yes used to re-stamp the
+turn and get her genuine confirmation refused as "same turn" — she said yes and was asked
+again. The two situations are indistinguishable from minting alone.
+
+So the mechanism now keys on **delivery**: `confirm.delivered()` is called by the agent
+loop when a turn ends with a reply she can actually read, and a token is spendable only in
+the turn **immediately after** that. A suppressed reply carries no summary and so delivers
+nothing. The cost is that a confirmation cannot be banked — if she answers with a question
+instead of a yes, the summary is put to her again — which is the safe direction and what
+"single use, short lived" already implied. Four regressions cover it, including both
+directions of the original conflict.
+
+**6. The output filter blocked her own figures.** She wrote *"Sebastian just payed 900
+usd"*; the reply that quoted **$900** back while asking whether it was a saving or a loan
+repayment was suppressed as a fabrication, twice, and she got the generic sentence. The
+cause was an asymmetry: `review` judged three spellings of money (`$900`, `900 dollars`,
+`900 usd`) while the allowlist harvested only `$`-prefixed ones — so her own number never
+entered the allowlist. Both sides now use one pattern, and a test asserts that whatever
+`review` is willing to call money, `allowed_money` harvests. This is the second time a
+guard and its allowlist drifted apart; the first was the numeral check in item 3.
+
+**7. A refusal she cannot diagnose is a refusal she cannot trust.** The blocked-reply
+sentences are deliberately vague — "an amount I could not verify" never says *which*
+amount — which made a false positive indistinguishable from a real catch without opening
+the trace. Refused and suppressed steps in the web chat now carry a collapsed **why**:
+the internal reason code, the offending figures, the allowlist they were judged against,
+and the withheld draft. This does **not** relax **F4** — the internal `reason` still never
+reaches the model, which is what would let it enumerate the controls. It reaches her
+browser, which is not the model.
 
 ---
 

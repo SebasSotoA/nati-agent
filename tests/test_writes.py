@@ -352,6 +352,7 @@ def test_interest_cannot_be_backdated_behind_a_payment(con, ctx) -> None:
                 monthly_rate=5, money_from="personal", lender_member_id=1,
                 date="2026-02-01")
     token = registry.dispatch(con, "record_loan", args, turn1).for_the_model["token"]
+    confirm.delivered(token, 1)     # the loop marks this when the turn ends
     made = registry.dispatch(
         con, "record_loan", {**args, "confirm_token": token}, turn2)
     loan_id = made.for_the_model["loan_id"]

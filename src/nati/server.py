@@ -139,7 +139,11 @@ def create_app(profile_name: str | None = None):
                 ):
                     if isinstance(event, loop.ToolStep):
                         steps.append({"name": event.name, "status": event.status,
-                                      "message": event.message})
+                                      "message": event.message,
+                                      # `debug` is for the administrator's own
+                                      # browser. It never goes to the model.
+                                      "debug": {"reason": event.reason}
+                                      if event.reason else None})
                     elif isinstance(event, loop.Reply):
                         reply = event.content
                     elif isinstance(event, loop.Retrying):
@@ -150,6 +154,13 @@ def create_app(profile_name: str | None = None):
                             "name": "output filter", "status": "blocked",
                             "message": _FILTER_SAID.get(
                                 event.cause, "the reply was not sent"),
+                            "debug": {
+                                "reason": event.cause,
+                                "unverified": event.unverified,
+                                "disclosed": event.disclosed,
+                                "allowed": event.allowed,
+                                "withheld": event.withheld,
+                            },
                         })
                     elif isinstance(event, loop.Failure):
                         reply = event.message

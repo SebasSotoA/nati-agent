@@ -514,25 +514,76 @@ def test_the_wrong_name_settles_nothing(con, ctx) -> None:
 # --------------------------------------------------------------------------
 
 
+def _loan_args(con) -> dict:
+    return dict(member_id=2, confirm_name=member(con, 2), amount=777,
+                monthly_rate=3, money_from="fund")
+
+
+def _offer(con, args: dict, turn: int) -> str:
+    """Raise the confirmation and mark it as having reached her, as the loop does."""
+    ctx = db.Ctx(conv_id="gate", seq=1, turn=turn)
+    token = registry.dispatch(con, "record_loan", args, ctx).for_the_model["token"]
+    confirm.delivered(token, turn)
+    return token
+
+
+def _spend(con, args: dict, token: str, turn: int):
+    return registry.dispatch(
+        con, "record_loan", {**args, "confirm_token": token},
+        db.Ctx(conv_id="gate", seq=1, turn=turn))
+
+
 def test_a_token_cannot_be_minted_and_spent_in_one_turn(con, ctx) -> None:
     """The human gate. Without it the mechanism only proved the model repeated
     itself — the loop allows several model calls per user message, so it could
     mint a token and spend it before she ever saw the summary."""
-    args = dict(member_id=2, confirm_name=member(con, 2), amount=777,
-                monthly_rate=3, money_from="fund")
-    same = db.Ctx(conv_id="one-turn", seq=1, turn=5)
-    token = registry.dispatch(con, "record_loan", args, same).for_the_model["token"]
+    args = _loan_args(con)
+    token = _offer(con, args, turn=5)
+    assert _spend(con, args, token, turn=5).for_the_model["ok"] is False
+    assert _spend(con, args, token, turn=6).for_the_model["ok"] is True
 
-    blocked = registry.dispatch(
-        con, "record_loan", {**args, "confirm_token": token}, same)
-    assert blocked.for_the_model["ok"] is False
 
-    later = db.Ctx(conv_id="one-turn", seq=1, turn=6)
-    fresh = registry.dispatch(con, "record_loan", args, later).for_the_model["token"]
-    done = registry.dispatch(
-        con, "record_loan", {**args, "confirm_token": fresh},
-        db.Ctx(conv_id="one-turn", seq=1, turn=7))
-    assert done.for_the_model["ok"] is True
+def test_an_offer_she_never_answered_cannot_be_spent_in_a_later_turn(con) -> None:
+    """The gate used to key on the EARLIEST turn a confirmation was minted in and
+    to accept any later turn. Together those let the model propose something in
+    turn 2, get no confirmation at all, and then mint-and-spend inside turn 5:
+    the check compared 5 > 2 instead of 5 > 5. Every rare write was affected."""
+    args = _loan_args(con)
+    _offer(con, args, turn=2)          # she is shown it and says nothing
+
+    # Turn 5: ask again and spend it immediately, without her ever confirming.
+    ctx5 = db.Ctx(conv_id="gate", seq=1, turn=5)
+    reminted = registry.dispatch(
+        con, "record_loan", args, ctx5).for_the_model["token"]
+    assert _spend(con, args, reminted, turn=5).for_the_model["ok"] is False
+
+    # Only once that fresh offer has actually reached her does the next turn work.
+    confirm.delivered(reminted, 5)
+    assert _spend(con, args, reminted, turn=6).for_the_model["ok"] is True
+
+
+def test_a_token_never_shown_to_her_is_not_spendable(con) -> None:
+    """Minting is not offering. A confirmation the loop never delivered — the turn
+    failed, or the reply carrying the summary was suppressed — opens nothing."""
+    args = _loan_args(con)
+    ctx = db.Ctx(conv_id="gate", seq=1, turn=2)
+    token = registry.dispatch(con, "record_loan", args, ctx).for_the_model["token"]
+    for turn in (3, 4, 20):
+        assert _spend(con, args, token, turn=turn).for_the_model["ok"] is False
+
+
+def test_a_failed_attempt_in_the_same_turn_does_not_burn_her_yes(con) -> None:
+    """She said yes and was asked again. If the model made any failed attempt in
+    the turn she confirmed — calling without the token first, which it does — the
+    re-mint used to move the gate to the current turn and her genuine
+    confirmation was then refused as same-turn."""
+    args = _loan_args(con)
+    token = _offer(con, args, turn=2)
+
+    # Turn 3 is her "yes". The model fumbles once before presenting the token.
+    registry.dispatch(con, "record_loan", args,
+                      db.Ctx(conv_id="gate", seq=1, turn=3))
+    assert _spend(con, args, token, turn=3).for_the_model["ok"] is True
 
 
 def test_resourcing_is_refused_even_with_a_different_amount_or_date(con, ctx) -> None:
@@ -640,6 +691,7 @@ def test_a_setting_can_be_corrected_the_same_day(con, ctx) -> None:
         args = {"key": "monthly_ticket_price", "value": value}
         token = registry.dispatch(
             con, "set_setting", args, first).for_the_model["token"]
+        confirm.delivered(token, turn)      # as the loop does when the turn ends
         return registry.dispatch(
             con, "set_setting", {**args, "confirm_token": token}, second)
 
@@ -775,6 +827,7 @@ def test_a_premature_attempt_does_not_burn_her_confirmation(con, ctx) -> None:
         ).for_the_model
 
     token = attempt(1)["token"]
+    confirm.delivered(token, 1)   # the summary reached her in turn 1
 
     # The model tries to spend it immediately. Refused — and must NOT consume it.
     assert attempt(1, confirm_token=token)["ok"] is False

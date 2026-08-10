@@ -39,9 +39,10 @@ from nati.tools.envelope import Figures
 _KEY = secrets.token_bytes(32)
 _TTL_SECONDS = 600.0
 
-# token -> (expiry_monotonic, minted_turn). Minted here, consumed here, nowhere
-# else. `minted_turn` is what makes the administrator's "yes" mandatory: see
-# `require`.
+# token -> (expiry_monotonic, delivered_turn). Minted here, consumed here, nowhere
+# else. `delivered_turn` is the turn in which the confirmation request actually
+# REACHED the administrator, recorded by `delivered()` from the agent loop — see
+# `_valid` for why the gate keys on delivery rather than on minting.
 _pending: dict[str, tuple[float, int | None]] = {}
 
 
@@ -60,20 +61,37 @@ def _mint(
     digest = hmac.new(
         _KEY, _canonical(conv_id, tool, args), hashlib.sha256
     ).hexdigest()[:16]
-    # Keep the EARLIEST turn this confirmation was ever offered in. Re-minting
-    # used to overwrite it with the current turn, which quietly moved the human
-    # gate: if the model made any failed attempt in the same turn as her "yes",
-    # that re-mint stamped the current turn and her genuine confirmation was
-    # then refused as "same turn". She said yes and was asked again.
+    # Minting NEVER moves the gate — only `delivered()` does. Re-minting has to
+    # carry the existing delivery forward, because the model may make a failed
+    # attempt in the very turn she says yes (calling without the token first, or
+    # with stale arguments). If that re-mint reset the delivery, her genuine
+    # confirmation would be refused and she would be asked the same question
+    # twice.
     existing = _pending.get(digest)
-    first_offered = turn
-    if existing is not None:
-        _, previous = existing
-        if previous is not None and (turn is None or previous < turn):
-            first_offered = previous
-    _pending[digest] = (time.monotonic() + _TTL_SECONDS, first_offered)
+    delivered_turn = existing[1] if existing is not None else None
+    _pending[digest] = (time.monotonic() + _TTL_SECONDS, delivered_turn)
     _sweep()
     return digest
+
+
+def delivered(token: str, turn: int | None) -> None:
+    """Record that this confirmation request actually REACHED the administrator.
+
+    Called by the agent loop when a turn ends with a reply she can read. It is
+    the only thing that opens the gate, and that is the point: minting happens
+    whenever the model calls the tool, which it can do several times inside one
+    message, whereas delivery happens at most once per turn and only when she
+    is actually shown the summary.
+    """
+    if turn is None:
+        return
+    entry = _pending.get(token)
+    if entry is None:
+        return
+    expiry, previous = entry
+    if previous is not None and previous >= turn:
+        return  # already recorded for this turn or a later one
+    _pending[token] = (expiry, turn)
 
 
 def _sweep() -> None:
@@ -87,7 +105,7 @@ def _valid(
     token: str, conv_id: str | None, tool: str, args: dict[str, Any],
     turn: int | None,
 ) -> bool:
-    """Right signature, still pending, not expired, and from an EARLIER turn.
+    """Right signature, still pending, not expired, and answered by her NEXT message.
 
     Consumes the token on success.
     """
@@ -99,20 +117,38 @@ def _valid(
     entry = _pending.get(expected)
     if entry is None:
         return False
-    expiry, minted_turn = entry
+    expiry, delivered_turn = entry
     if time.monotonic() > expiry:
         _pending.pop(expected, None)
         return False
-    # THE HUMAN GATE. Without this the model could mint a token and spend it
-    # inside the same user turn — the loop allows several model calls per
-    # message — so what the mechanism enforced was "the model repeated itself",
-    # not "the administrator agreed". Requiring a later turn means her message
-    # has to arrive in between.
-    if turn is not None and minted_turn is not None and turn <= minted_turn:
-        # NOT consumed. The check is READ-ONLY until everything passes: an
-        # early `pop` meant a premature attempt burned a perfectly good
-        # confirmation, and only a lucky re-mint put it back.
-        return False
+    # THE HUMAN GATE: the token is spendable only in the turn IMMEDIATELY after
+    # the one in which she was shown the summary.
+    #
+    # The first version of this compared against the turn the token was MINTED
+    # in, and required only a later turn. Both halves were wrong.
+    #
+    # Minting is the wrong event: the model mints, several times per message if
+    # it likes, so a mint-based gate proved the model had repeated itself, not
+    # that she agreed. Delivery is the right event — it happens once a turn, and
+    # only when a reply she can read actually goes out.
+    #
+    # "Any later turn" was the wrong test: with the earliest-mint carried
+    # forward, an action proposed in turn 2 and NEVER confirmed became writable
+    # in any single later turn, because the model could mint and spend inside
+    # turn 5 and the check compared 5 > 2. Requiring exactly the next turn is
+    # what distinguishes "she answered this" from "she was asked this once, ages
+    # ago, and said nothing". The cost is that a confirmation cannot be banked:
+    # if she replies with a question instead of a yes, the summary is put to her
+    # again. That is the safe direction, and it is what short-lived and
+    # single-use already implied.
+    if turn is not None:
+        if delivered_turn is None:
+            return False  # never actually put to her
+        if turn != delivered_turn + 1:
+            return False
+        # NOT consumed on any failure above. The check is READ-ONLY until
+        # everything passes: an early `pop` meant a premature attempt burned a
+        # perfectly good confirmation, and only a lucky re-mint put it back.
 
     _pending.pop(expected, None)      # single use — spent only now that it is valid
     return True
@@ -134,8 +170,9 @@ def require(
     different arguments, or was minted in this same turn).
 
     `turn` is the administrator's message number in this conversation. A token is
-    only spendable in a LATER turn than the one that minted it, which is what
-    forces her to actually say yes.
+    only spendable in the turn immediately AFTER the one in which the request was
+    delivered to her (see `delivered` and `_valid`), which is what forces her to
+    actually say yes.
     """
     token = args.get("confirm_token")
     if isinstance(token, str) and _valid(token, conv_id, tool, args, turn):

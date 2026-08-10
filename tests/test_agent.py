@@ -416,3 +416,130 @@ def test_money_is_reported_before_a_named_tool(con, tracer, monkeypatch) -> None
         )
     assert v.cause == egress.FIGURES
     assert v.reply == egress.BLOCKED_REPLY
+
+
+# --------------------------------------------------------------------------
+# A confirmation only becomes spendable once she has actually seen it
+# --------------------------------------------------------------------------
+
+
+def _set_setting_call(cid: str, **extra):
+    args = {"key": "monthly_prize", "value": 70, **extra}
+    return ToolCall(id=cid, name="set_setting", arguments_raw=json.dumps(args),
+                    arguments=args, parse_ok=True)
+
+
+def _token_from(history) -> str:
+    """The confirmation token the tool handed back during the turn."""
+    for message in history:
+        if message.get("role") != "tool":
+            continue
+        env = json.loads(message["content"])
+        if isinstance(env.get("token"), str):
+            return env["token"]
+    raise AssertionError("no confirmation token was offered")
+
+
+def test_a_delivered_confirmation_is_spendable_next_turn(con, tracer, monkeypatch) -> None:
+    """The loop is what tells `confirm` a summary reached her: the turn ended with
+    a reply she can read. Without that signal nothing is ever spendable."""
+    from nati.tools import confirm, registry
+
+    confirm.reset()
+    script = [
+        _turn(tool_calls=[_set_setting_call("c1")]),
+        _turn(content="Change the monthly prize to $70? Say yes and I will record it."),
+    ]
+    history, _ = _run(con, tracer, "set the monthly prize to 70", script, monkeypatch)
+    token = _token_from(history)
+
+    # Her next message is turn 2. The write lands.
+    done = registry.dispatch(
+        con, "set_setting",
+        {"key": "monthly_prize", "value": 70, "confirm_token": token},
+        db.Ctx(conv_id=tracer.conv_id, seq=1, turn=2),
+    )
+    assert done.for_the_model["ok"] is True
+    confirm.reset()
+
+
+def test_a_suppressed_reply_does_not_deliver_the_confirmation(
+    con, tracer, monkeypatch
+) -> None:
+    """If the filter withheld the reply, she never read the summary — so the
+    confirmation must stay shut, even though a turn went by. Delivery is about
+    what reached HER, not about time passing."""
+    from nati.tools import confirm, registry
+
+    confirm.reset()
+    # Every reply this turn states an amount no tool returned, so both the first
+    # attempt and the one retry are suppressed and she gets a fixed sentence.
+    script = [
+        _turn(tool_calls=[_set_setting_call("c1")]),
+        _turn(content="I have set it to $99,999 already."),
+    ]
+    history, events = _run(con, tracer, "set the monthly prize to 70",
+                           script, monkeypatch)
+    assert any(type(e).__name__ == "Retrying" for e in events)
+    reply = next(e for e in events if type(e).__name__ == "Reply")
+    assert reply.content == egress.BLOCKED_REPLY
+
+    token = _token_from(history)
+    blocked = registry.dispatch(
+        con, "set_setting",
+        {"key": "monthly_prize", "value": 70, "confirm_token": token},
+        db.Ctx(conv_id=tracer.conv_id, seq=1, turn=2),
+    )
+    assert blocked.for_the_model["ok"] is False
+    confirm.reset()
+
+
+# --------------------------------------------------------------------------
+# The debug detail: to her browser, never to the model
+# --------------------------------------------------------------------------
+
+
+def test_the_internal_reason_reaches_the_ui_but_not_the_model(
+    con, tracer, monkeypatch
+) -> None:
+    """`reason` names which guard fired. The model must not see it — that is how
+    it would enumerate the taxonomy of controls — but the administrator debugging
+    her own agent is not the model."""
+    script = [
+        _turn(tool_calls=[ToolCall(
+            id="c1", name="record_saving",
+            arguments_raw='{"member_id":2,"confirm_name":"Wrong Name","amount":50}',
+            arguments={"member_id": 2, "confirm_name": "Wrong Name", "amount": 50},
+            parse_ok=True)]),
+        _turn(content="That name did not match."),
+    ]
+    history, events = _run(con, tracer, "save 50 for member 2", script, monkeypatch)
+
+    refused = next(e for e in events
+                   if type(e).__name__ == "ToolStep" and e.status == "refused")
+    assert refused.reason == "name_mismatch"
+
+    for message in history:
+        if message.get("role") == "tool":
+            assert "reason" not in json.loads(message["content"])
+
+
+def test_a_suppressed_reply_carries_the_specifics_for_the_ui(
+    con, tracer, monkeypatch
+) -> None:
+    """"held back an amount no tool had returned" does not say WHICH amount, so a
+    false positive was indistinguishable from a real catch without opening the
+    trace. The event now carries the offending figures, the allowlist it was
+    judged against, and the text that was withheld."""
+    script = [
+        _turn(tool_calls=[ToolCall(id="c1", name="fund_status", arguments_raw="{}",
+                                   arguments={}, parse_ok=True)]),
+        _turn(content="The fund will hold $91,234 by December."),
+    ]
+    _, events = _run(con, tracer, "how much in december?", script, monkeypatch)
+
+    retry = next(e for e in events if type(e).__name__ == "Retrying")
+    assert retry.cause == egress.FIGURES
+    assert "$91,234" in retry.unverified
+    assert retry.allowed, "the allowlist it was judged against should be shown"
+    assert "91,234" in retry.withheld
