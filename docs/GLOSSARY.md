@@ -39,7 +39,7 @@ regional variants, and translating it would make the domain generic.
 | caja | cash on hand | what the fund can actually pay today |
 | cartera | outstanding loans | capital that is out on loan |
 | utilidades | profits | split **equally**, unlike savings |
-| ciclo | cycle | January–November of one year |
+| ciclo | cycle | months from `cycle_first_month` / `cycle_last_month` (default January–November of one year) |
 | saldo | balance | what remains to be paid |
 | vigencia | effective date | settings are dated, never overwritten |
 
@@ -143,13 +143,17 @@ Two columns were added to her tables and one changed shape. All three are docume
 | `registrar_reversa` | `record_reversal` | write (two-phase, savings only) |
 | `registrar_sorteo` | `record_draw` | write (two-phase) |
 | `set_configuracion` | `set_setting` | write (two-phase) |
+| `iniciar_ciclo` | `start_cycle` | write (two-phase) |
+| `reiniciar_ciclo` | `reset_cycle` | write (two-phase) |
 
-19 tools total: 8 read, 11 write. The last six writes above take a
+21 tools total: 8 read, 13 write. The last eight writes above take a
 `confirm_token`: the first call returns a summary and a token, and the write
 happens only on a second call carrying that token (see
 [`tools/confirm.py`](../src/nati/tools/confirm.py)). `record_reversal` corrects
 **savings only** — a loan payment cannot be reversed, because the interest-first
-arithmetic is order-dependent.
+arithmetic is order-dependent. `reset_cycle` is the only delete: it archives the
+current year's money rows first. Cycle months are read from settings
+(`cycle_first_month` / `cycle_last_month`), not hardcoded.
 
 ## Modules
 

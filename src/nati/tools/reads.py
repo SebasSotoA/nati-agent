@@ -510,7 +510,8 @@ def raffle_status(
     holds which number, both to sell tickets and to verify a winner.
     """
     which = gates.choice(kind, "raffle kind", ("monthly", "quarterly"))
-    m = gates.cycle_month(month)
+    first, last = q.cycle_months(con)
+    m = gates.cycle_month(month, first_month=first, last_month=last)
     year = q.cycle_year(con)
     figures = Figures()
 

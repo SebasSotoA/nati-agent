@@ -138,6 +138,24 @@ def test_a_conv_id_cannot_escape_the_trace_directory(tmp_path) -> None:
     assert tracer.dir.resolve().is_relative_to(tmp_path.resolve())
 
 
+def test_resume_seq_continues_numbering_without_rewriting_meta(tmp_path: Path) -> None:
+    from nati.agent.tracer import Tracer, new_conv_id
+
+    conv_id = new_conv_id()
+    first = Tracer(conv_id=conv_id, operator="a", root=tmp_path)
+    first.conv_start({"model": "test"})
+    first.user_message("hi")
+    first.llm_request({"model": "x", "messages": []})
+    meta = (tmp_path / conv_id / "meta.json").read_text(encoding="utf-8")
+    seq_after = first._seq
+
+    second = Tracer(conv_id=conv_id, operator="a", root=tmp_path)
+    second.resume_seq()
+    second.user_message("again")
+    assert second._seq == seq_after + 1
+    assert (tmp_path / conv_id / "meta.json").read_text(encoding="utf-8") == meta
+
+
 def test_the_endpoint_rejects_a_hostile_conv_id() -> None:
     """The server must answer 400, not 500, and must not adopt the id."""
     source = INDEX.parent.parent.joinpath("server.py").read_text(encoding="utf-8")

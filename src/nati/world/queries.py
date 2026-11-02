@@ -24,6 +24,20 @@ def cycle_year(con: sqlite3.Connection) -> int:
     return setting_int(con, "cycle_year", clock.today_iso(), clock.today().year)
 
 
+def cycle_months(con: sqlite3.Connection) -> tuple[int, int]:
+    """(first_month, last_month) from settings, defaulting to January–November."""
+    date = clock.today_iso()
+    first = setting_int(con, "cycle_first_month", date, 1)
+    last = setting_int(con, "cycle_last_month", date, 11)
+    if not 1 <= first <= 12:
+        first = 1
+    if not 1 <= last <= 12:
+        last = 11
+    if first > last:
+        return 1, 11
+    return first, last
+
+
 # --------------------------------------------------------------------------
 # Dated settings
 # --------------------------------------------------------------------------

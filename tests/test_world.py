@@ -1,6 +1,6 @@
 """Tests for the world: schema guarantees, audit trail, and the seed's figures.
 
-No network. Each test builds a fresh world from schema.sql + seed.sql.
+No network. Each test builds a fresh world from schema.sql + the challenge fixture.
 """
 
 from __future__ import annotations

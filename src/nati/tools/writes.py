@@ -83,7 +83,15 @@ def _movement_date(con: sqlite3.Connection, when: object) -> str:
     """The date of a money movement: today by default, inside the cycle."""
     if when in (None, ""):
         return clock.today_iso()
-    return gates.date_in_cycle(when, q.cycle_year(con))
+    first, last = q.cycle_months(con)
+    return gates.date_in_cycle(
+        when, q.cycle_year(con), first_month=first, last_month=last
+    )
+
+
+def _cycle_month(con: sqlite3.Connection, value: object) -> int:
+    first, last = q.cycle_months(con)
+    return gates.cycle_month(value, first_month=first, last_month=last)
 
 
 def _not_before_last_movement(
@@ -309,7 +317,7 @@ def accrue_monthly_interest(
     of personal interest is individually justified and individually audited,
     rather than slipping in under a general "charge July's interest".
     """
-    m = gates.cycle_month(month)
+    m = _cycle_month(con, month)
     year = q.cycle_year(con)
     if (year, m) > (clock.today().year, clock.today().month):
         return refuse(
@@ -483,7 +491,7 @@ def sell_raffle_ticket(
     """
     member = _confirmed_member(con, member_id, confirm_name)
     which = gates.choice(kind, "raffle kind", ("monthly", "quarterly"))
-    m = gates.cycle_month(month)
+    m = _cycle_month(con, month)
     year = q.cycle_year(con)
     n1 = gates.raffle_number(number_1, "first number")
 

@@ -423,6 +423,59 @@ TOOLS: tuple[Tool, ...] = (
         ),
         writes=True,
     ),
+    Tool(
+        "start_cycle",
+        "Opens the next cycle year. Members carry forward. The year can only "
+        "move forward, never back. Asks for confirmation first.",
+        _obj(
+            {
+                "year": {
+                    "type": "integer",
+                    "description": "The new cycle year. Defaults to the current "
+                                   "cycle year plus one.",
+                },
+                "first_month": {
+                    "type": "integer",
+                    "description": "First month of the cycle, 1–12. Defaults to 1.",
+                },
+                "last_month": {
+                    "type": "integer",
+                    "description": "Last month of the cycle, 1–12. Defaults to 11.",
+                },
+                "confirm_token": _CONFIRM_TOKEN,
+            },
+            [],
+        ),
+        lambda con, ctx, **kw: writes_rare.start_cycle(
+            con, ctx, kw.get("year"), kw.get("first_month"),
+            kw.get("last_month"), kw.get("confirm_token"),
+        ),
+        writes=True,
+    ),
+    Tool(
+        "reset_cycle",
+        "Archives one year's savings, loans, tickets and draws, then removes "
+        "those rows. Defaults to the active year, or the previous year if the "
+        "active one is empty (so it still works after start_cycle). Members "
+        "and lenders stay. The only way anything is deleted. Asks for "
+        "confirmation first.",
+        _obj(
+            {
+                "year": {
+                    "type": "integer",
+                    "description": "The cycle year to archive. Defaults to the "
+                                   "active year, or the previous year if that "
+                                   "one has no money rows.",
+                },
+                "confirm_token": _CONFIRM_TOKEN,
+            },
+            [],
+        ),
+        lambda con, ctx, **kw: writes_rare.reset_cycle(
+            con, ctx, kw.get("confirm_token"), kw.get("year"),
+        ),
+        writes=True,
+    ),
 )
 
 BY_NAME: dict[str, Tool] = {t.name: t for t in TOOLS}

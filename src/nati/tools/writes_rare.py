@@ -1,4 +1,4 @@
-"""The 6 rare write tools, every one two-phase — plus `mark_ticket_paid`.
+"""The 8 rare write tools, every one two-phase — plus `mark_ticket_paid`.
 
 `mark_ticket_paid` is daily and single-phase and belongs in `writes.py`; it ended
 up here and the filename now lies about it. A move, not a rewrite, whenever the
@@ -14,7 +14,8 @@ the same call comes back with that token.
 What is deliberately NOT here, so it cannot be talked into:
 
 - No `close_loan` (closing is a consequence of reaching zero, in writes.py).
-- No un-void, no un-pay, no edit, no delete of anything.
+- No un-void, no un-pay, no edit. `reset_cycle` is the only delete, and it
+  archives first.
 - `record_reversal` covers savings entries ONLY. A loan payment cannot be
   reversed: the interest-first arithmetic is order-dependent, so a negative
   payment has no sound meaning. Overpayment is refused at entry, which removes
@@ -32,7 +33,7 @@ from typing import Any
 from nati import clock
 from nati.tools import calc, confirm, gates
 from nati.tools.envelope import Figures, ok, refuse, usd
-from nati.tools.writes import _confirmed_member, _movement_date
+from nati.tools.writes import _confirmed_member, _cycle_month, _movement_date
 from nati.world import db
 from nati.world import queries as q
 
@@ -443,7 +444,7 @@ def record_draw(
     natillera — that is the confirmed house rule.
     """
     which = gates.choice(kind, "raffle kind", ("monthly", "quarterly"))
-    m = gates.cycle_month(month)
+    m = _cycle_month(con, month)
     n = gates.raffle_number(winning_number, "winning number")
     year = q.cycle_year(con)
     today = clock.today()
@@ -605,6 +606,227 @@ def set_setting(
 
 
 # --------------------------------------------------------------------------
+# start_cycle
+# --------------------------------------------------------------------------
+
+
+def start_cycle(
+    con: sqlite3.Connection,
+    ctx: db.Ctx,
+    year: object = None,
+    first_month: object = None,
+    last_month: object = None,
+    confirm_token: object = None,
+) -> dict[str, Any]:
+    """Advance the cycle year. Members stay; money already recorded stays.
+
+    New members can join once the new year has no money moving yet.
+    """
+    current = q.cycle_year(con)
+    if year in (None, ""):
+        target = current + 1
+    else:
+        target = gates.in_range(year, "year", 2020, 2100)
+
+    if target <= current:
+        return refuse(
+            "cycle_not_forward",
+            f"The cycle is already {current}. It can only move forward.",
+            can_retry=False,
+        )
+
+    months_given = first_month not in (None, "") or last_month not in (None, "")
+    first = (
+        gates.in_range(first_month, "first month", 1, 12)
+        if first_month not in (None, "")
+        else 1
+    )
+    last = (
+        gates.in_range(last_month, "last month", 1, 12)
+        if last_month not in (None, "")
+        else 11
+    )
+    if first > last:
+        return refuse(
+            "invalid_cycle_months",
+            "The first month of the cycle cannot be after the last month.",
+        )
+
+    upto = clock.today_iso()
+    outstanding = 0
+    outstanding_cash = 0
+    for row in con.execute(
+        """SELECT id FROM loans
+            WHERE lender_id = ? AND status = 'active'""",
+        (FUND_ID,),
+    ):
+        balance = q.loan_balance(con, int(row["id"]), upto)
+        if balance.total:
+            outstanding += 1
+            outstanding_cash += balance.total
+    unpaid = int(
+        con.execute(
+            "SELECT COUNT(*) FROM raffle_tickets WHERE paid = 0"
+        ).fetchone()[0]
+    )
+    n_members = int(con.execute("SELECT COUNT(*) FROM members").fetchone()[0])
+
+    figures = Figures()
+    figures.number("year", target)
+    figures.number("first_month", first)
+    figures.number("last_month", last)
+    figures.number("members_carry_forward", n_members)
+    figures.number("outstanding_fund_loans", outstanding)
+    figures.money("outstanding_fund_cash", outstanding_cash)
+    figures.number("unpaid_tickets", unpaid)
+
+    summary = (
+        f"Start the {target} cycle (months {first}–{last}). "
+        f"{n_members} members carry forward. "
+        f"Outstanding fund loans: {outstanding}, still out {usd(outstanding_cash)}. "
+        f"Unpaid raffle tickets: {unpaid}."
+    )
+    pending = confirm.require(
+        ctx.conv_id, "start_cycle", ctx.raw_args or {},
+        summary, figures, turn=ctx.turn,
+    )
+    if pending is not None:
+        return pending
+
+    with db.transaction(con):
+        db.insert(
+            con, "settings",
+            {
+                "key": "cycle_year",
+                "value": str(target),
+                "effective_from": clock.today_iso(),
+                "note": "cycle started via chat",
+            },
+            ctx,
+        )
+        if months_given:
+            if first_month not in (None, ""):
+                db.insert(
+                    con, "settings",
+                    {
+                        "key": "cycle_first_month",
+                        "value": str(first),
+                        "effective_from": clock.today_iso(),
+                        "note": "cycle started via chat",
+                    },
+                    ctx,
+                )
+            if last_month not in (None, ""):
+                db.insert(
+                    con, "settings",
+                    {
+                        "key": "cycle_last_month",
+                        "value": str(last),
+                        "effective_from": clock.today_iso(),
+                        "note": "cycle started via chat",
+                    },
+                    ctx,
+                )
+
+    return ok(
+        f"Done: the {target} cycle is now open (months {first}–{last}). "
+        "Members carry forward.",
+        year=target, first_month=first, last_month=last,
+        world_hash=db.world_hash(con), figures=figures,
+    )
+
+
+# --------------------------------------------------------------------------
+# reset_cycle
+# --------------------------------------------------------------------------
+
+
+def _year_scoped_counts(con: sqlite3.Connection, year: int) -> dict[str, int]:
+    y = f"{year:04d}"
+    def n(sql: str, params: tuple[Any, ...]) -> int:
+        return int(con.execute(sql, params).fetchone()[0])
+    return {
+        "savings": n(
+            "SELECT COUNT(*) FROM savings WHERE substr(date, 1, 4) = ?", (y,)
+        ),
+        "loans": n(
+            "SELECT COUNT(*) FROM loans WHERE substr(started_on, 1, 4) = ?",
+            (y,),
+        ),
+        "tickets": n(
+            "SELECT COUNT(*) FROM raffle_tickets WHERE year = ?", (year,)
+        ),
+        "draws": n("SELECT COUNT(*) FROM draws WHERE year = ?", (year,)),
+    }
+
+
+def reset_cycle(
+    con: sqlite3.Connection,
+    ctx: db.Ctx,
+    confirm_token: object = None,
+    year: object = None,
+) -> dict[str, Any]:
+    """Archive and remove one year's money rows. Members and lenders stay.
+
+    Defaults to the active cycle year if it still has rows; otherwise the
+    previous year. After start_cycle, that is the year just left, not the
+    empty new one.
+    """
+    current = q.cycle_year(con)
+    if year in (None, ""):
+        target = current
+        counts = _year_scoped_counts(con, target)
+        if sum(counts.values()) == 0:
+            target = current - 1
+            counts = _year_scoped_counts(con, target)
+    else:
+        target = gates.in_range(year, "year", 2020, 2100)
+        counts = _year_scoped_counts(con, target)
+
+    total = sum(counts.values())
+    if total == 0:
+        return refuse(
+            "nothing_to_reset",
+            f"There is nothing to archive for the {target} cycle: no savings, "
+            "loans, tickets or draws.",
+            can_retry=False,
+        )
+
+    figures = Figures()
+    figures.number("year", target)
+    figures.number("savings", counts["savings"])
+    figures.number("loans", counts["loans"])
+    figures.number("tickets", counts["tickets"])
+    figures.number("draws", counts["draws"])
+
+    summary = (
+        f"Archive and remove {counts['savings']} savings, {counts['loans']} "
+        f"loans, {counts['tickets']} tickets, {counts['draws']} draws for "
+        f"{target}. Members and lenders stay."
+    )
+    pending = confirm.require(
+        ctx.conv_id, "reset_cycle", ctx.raw_args or {},
+        summary, figures, turn=ctx.turn,
+    )
+    if pending is not None:
+        return pending
+
+    result = db.reset_cycle_year(con, target, ctx)
+    return ok(
+        f"Done: I archived and removed the {target} cycle's savings, loans, "
+        "tickets and draws. Members and lenders stay.",
+        year=target,
+        archive_id=result["archive_id"],
+        savings=counts["savings"],
+        loans=counts["loans"],
+        tickets=counts["tickets"],
+        draws=counts["draws"],
+        world_hash=db.world_hash(con),
+        figures=figures,
+    )
+
+
+# --------------------------------------------------------------------------
 # mark_ticket_paid
 # --------------------------------------------------------------------------
 
@@ -625,7 +847,7 @@ def mark_ticket_paid(
     """
     member = _confirmed_member(con, member_id, confirm_name)
     which = gates.choice(kind, "raffle kind", ("monthly", "quarterly"))
-    m = gates.cycle_month(month)
+    m = _cycle_month(con, month)
     year = q.cycle_year(con)
 
     ticket = con.execute(

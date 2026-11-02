@@ -63,7 +63,7 @@ def cmd_profiles(_args: argparse.Namespace) -> int:
     console.print(
         "\n[dim]Nothing in the code depends on which model is used. To switch:"
         "\n  edit profiles.toml, or  --profile <name>,"
-        "\n  or  NATI_MODEL=<bedrock-model-id>  for one run.[/dim]\n"
+        "\n  or  NATI_MODEL=<ollama-model-id>  for one run.[/dim]\n"
     )
     return 0
 
@@ -97,11 +97,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 "(reasoning_effort is empty).")
 
     # --- World ---
-    if config.SCHEMA_SQL.exists() and config.SEED_SQL.exists():
-        _line(OK, "World SQL", "schema.sql + seed.sql present")
+    if config.SCHEMA_SQL.exists() and config.BOOTSTRAP_SQL.exists():
+        _line(OK, "World SQL", "schema.sql + bootstrap.sql present")
     else:
         problems += 1
-        _line(FAIL, "World SQL", "schema.sql or seed.sql missing")
+        _line(FAIL, "World SQL", "schema.sql or bootstrap.sql missing")
 
     if config.DB_PATH.exists():
         _line(OK, "World database", str(config.DB_PATH.relative_to(config.ROOT)))
@@ -111,10 +111,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     # --- Key ---
     if config.api_key_present():
-        _line(OK, "Bedrock key", f"loaded from {config.key_source()}")
+        _line(OK, "Ollama key", f"loaded from {config.key_source()}")
     else:
         problems += 1
-        _line(FAIL, "Bedrock key", "I cannot find it")
+        _line(FAIL, "Ollama key", "I cannot find it")
         if config.ENV_FILE.exists():
             _detail(".env exists but NATI_API_KEY is empty. Paste the key inside.")
         else:
@@ -212,7 +212,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
     from nati.world import db
 
     try:
-        path = db.create(reset=args.reset)
+        path = db.create(reset=args.reset, seed="prod")
     except WorldError as exc:
         console.print(f"\n[red]{exc}[/red]\n")
         return 1
@@ -226,6 +226,31 @@ def cmd_seed(args: argparse.Namespace) -> int:
         )
     finally:
         con.close()
+    return 0
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    """Register the first administrator on an existing production world."""
+    from nati.world import db
+
+    try:
+        con = db.connect()
+    except WorldError as exc:
+        console.print(f"\n[red]{exc}[/red]\n")
+        return 1
+    try:
+        result = db.bootstrap_admin(con, args.name, args.phone)
+    except WorldError as exc:
+        console.print(f"\n[red]{exc}[/red]\n")
+        return 1
+    finally:
+        con.close()
+
+    console.print(
+        f"\n[green]Administrator registered[/green]  "
+        f"{args.name} · member {result['member_id']} · "
+        f"personal lender {result['lender_id']}\n"
+    )
     return 0
 
 
@@ -419,7 +444,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     """Start the web chat server."""
     if not config.api_key_present():
         console.print(
-            "\n[red]No Bedrock key found.[/red] The chat needs the model.\n"
+            "\n[red]No Ollama key found.[/red] The chat needs the model.\n"
             "  Run:  cp .env.example .env    and paste the key inside\n"
         )
         return 1
@@ -429,8 +454,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         from nati.world import db
 
         try:
-            db.create(reset=False)
-            console.print("[dim]Built var/world.db from the versioned seed.[/dim]")
+            db.create(reset=False, seed="prod")
+            console.print("[dim]Built empty books at var/world.db. "
+                          "Run:  uv run nati bootstrap --name ... --phone ...[/dim]")
         except WorldError as exc:
             console.print(f"\n[red]{exc}[/red]\n")
             return 1
@@ -471,9 +497,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("profiles", help="List the model profiles.")
     p.set_defaults(func=cmd_profiles)
 
-    s = sub.add_parser("seed", help="Build the world from schema.sql + seed.sql.")
+    s = sub.add_parser(
+        "seed",
+        help="Build the empty production world from schema.sql + bootstrap.sql.",
+    )
     s.add_argument("--reset", action="store_true", help="Delete and rebuild.")
     s.set_defaults(func=cmd_seed)
+
+    b = sub.add_parser(
+        "bootstrap",
+        help="Register the administrator on an existing empty production world.",
+    )
+    b.add_argument("--name", required=True, help="The administrator's full name.")
+    b.add_argument("--phone", required=True, help="Exactly 10 digits.")
+    b.set_defaults(func=cmd_bootstrap)
 
     f = sub.add_parser("fund", help="The state of the common fund (no model needed).")
     f.add_argument("--date", default=None, help="Cut-off date (default: today).")

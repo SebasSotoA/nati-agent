@@ -1,7 +1,7 @@
-"""The seed generator must be deterministic.
+"""The challenge-world generator must be deterministic.
 
 Every conversation trace is anchored to a `world_db_sha256`, so the same
-generator must produce the same seed.sql byte for byte — otherwise two people
+generator must produce the same fixture byte for byte — otherwise two people
 who "reset the world" get different worlds and cannot compare findings. The
 generator's own docstring promises this test exists; here it is.
 """
@@ -30,11 +30,13 @@ def test_generation_is_byte_identical_across_runs(gen) -> None:
 
 
 def test_the_committed_seed_matches_the_generator(gen) -> None:
-    """If someone hand-edits seed.sql, this fails — the seed is generated, not
-    written. Re-run:  uv run python scripts/generate_seed.py"""
-    committed = (ROOT / "src" / "nati" / "world" / "seed.sql").read_text(encoding="utf-8")
+    """If someone hand-edits the fixture, this fails — the seed is generated,
+    not written. Re-run:  uv run python scripts/generate_seed.py"""
+    committed = (ROOT / "tests" / "fixtures" / "challenge_world.sql").read_text(
+        encoding="utf-8"
+    )
     assert gen.generate() == committed, (
-        "seed.sql is out of sync with the generator; "
+        "challenge_world.sql is out of sync with the generator; "
         "run `uv run python scripts/generate_seed.py`"
     )
 

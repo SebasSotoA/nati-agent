@@ -204,6 +204,24 @@ class Tracer:
     def conv_end(self, reason: str, totals: dict[str, Any]) -> None:
         self._write_line("conv_end", {"reason": reason, "totals": totals})
 
+    def resume_seq(self) -> None:
+        """Continue numbering from an existing turns.jsonl. Does not rewrite meta."""
+        path = self.dir / "turns.jsonl"
+        if not path.exists():
+            return
+        last_seq = 0
+        last_call = 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            last_seq = max(last_seq, int(record.get("seq") or 0))
+            data = record.get("data") or {}
+            if record.get("type") in ("llm_request", "llm_response"):
+                last_call = max(last_call, int(data.get("call") or 0))
+        self._seq = last_seq
+        self._calls = last_call
+
     def _write_raw(self, seq_hint: int, kind: str, payload: dict[str, Any]) -> None:
         raw_dir = self.dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)

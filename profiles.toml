@@ -4,16 +4,10 @@
 # which model is used, or on which family it belongs to. Swapping models is an
 # edit here, or a single environment variable — never a code change.
 #
-# The platform is AWS Bedrock, reached through its OpenAI-Chat-Completions
-# compatible endpoint. Any Bedrock model that supports tool calling will work.
+# Production: Ollama Cloud, reached through its OpenAI-Chat-Completions
+# compatible endpoint. The user sets the model.
 #
-# The exercise requires an OPEN-WEIGHT model: no Claude, no GPT. Anything else
-# is a free choice.
-#
-# The region is FIXED per profile on purpose: reading it from AWS_REGION would
-# give a teammate whose default is ca-central-1 an incomprehensible error.
-#
-# Authentication: NATI_API_KEY (or AWS_BEARER_TOKEN_BEDROCK). Never in a file
+# Authentication: NATI_API_KEY (or OLLAMA_API_KEY). Never in a file
 # that is committed.
 #
 # --------------------------------------------------------------------------
@@ -21,7 +15,7 @@
 # --------------------------------------------------------------------------
 #   Permanently:  change `model` below, or add a new [profiles.<name>] block
 #   For one run:  uv run nati doctor --profile <name>
-#   Ad hoc:       NATI_MODEL="<bedrock-model-id>" uv run nati doctor
+#   Ad hoc:       NATI_MODEL="<ollama-model-id>" uv run nati doctor
 #
 # `nati doctor` verifies whatever is configured: that the id resolves, that tool
 # calling works, and whether the model returns a Chain of Thought. If a model
@@ -31,64 +25,21 @@
 default_profile = "default"
 
 [profiles.default]
-model = "qwen.qwen3-32b"
-base_url = "https://bedrock-mantle.us-west-2.api.aws/v1"
-region = "us-west-2"
+model = "gpt-oss:120b"
+base_url = "https://ollama.com/v1"
 max_tokens = 4096
 # Some reasoning models only return their Chain of Thought when it is explicitly
 # requested; others ignore this field entirely. Harmless either way, and the
 # Chain of Thought is one of the exercise's deliverables.
 reasoning_effort = "high"
 temperature = 0.1
-description = "Default target for the exercise. Open-weight (Qwen3, Apache 2.0)."
+description = "Ollama Cloud. Override the model id with NATI_MODEL or edit this file."
 
-[profiles.nemotron]
-model = "nvidia.nemotron-super-3-120b"
-base_url = "https://bedrock-mantle.us-west-2.api.aws/v1"
-region = "us-west-2"
-max_tokens = 4096
-reasoning_effort = "high"
-temperature = 0.1
-description = "Larger alternative. Open-weight, strong tool calling."
-
-[profiles.fast]
-model = "nvidia.nemotron-nano-3-30b"
-base_url = "https://bedrock-mantle.us-west-2.api.aws/v1"
-region = "us-west-2"
-max_tokens = 4096
-reasoning_effort = "medium"
-temperature = 0.1
-description = "Smaller and cheaper, for iterating while building."
-
-# --------------------------------------------------------------------------
-# Other families. Uncomment one, or copy the shape for any Bedrock model.
-# Check the exact model id in the Bedrock console: ids change between versions,
-# and not every model is enabled in every region.
-# --------------------------------------------------------------------------
-
-# [profiles.qwen]
-# model = "qwen.qwen3-32b-v1:0"
-# base_url = "https://bedrock-mantle.us-west-2.api.aws/v1"
-# region = "us-west-2"
+# Example of a second profile. Copy the shape and set the model id.
+# [profiles.fast]
+# model = "gpt-oss:20b"
+# base_url = "https://ollama.com/v1"
 # max_tokens = 4096
-# reasoning_effort = "high"
-# temperature = 0.3
-# description = "Qwen3 — open-weight, Apache 2.0."
-
-# [profiles.llama]
-# model = "meta.llama3-3-70b-instruct-v1:0"
-# base_url = "https://bedrock-mantle.us-west-2.api.aws/v1"
-# region = "us-west-2"
-# max_tokens = 4096
-# reasoning_effort = ""          # this family returns no separate reasoning
-# temperature = 0.3
-# description = "Llama 3.3 — open weights, Llama Community License."
-
-# [profiles.mistral]
-# model = "mistral.mistral-large-2407-v1:0"
-# base_url = "https://bedrock-mantle.us-west-2.api.aws/v1"
-# region = "us-west-2"
-# max_tokens = 4096
-# reasoning_effort = ""
-# temperature = 0.3
-# description = "Mistral. Check the licence against the open-weight requirement."
+# reasoning_effort = "medium"
+# temperature = 0.1
+# description = "Smaller and cheaper, for iterating while building."

@@ -78,8 +78,8 @@ def test_small_counts_are_free() -> None:
 
 
 def test_prompt_numerals_are_allowed() -> None:
-    # "29 members" and today's date come from the system prompt itself.
-    v = _review("The natillera has 29 members and today is 2026-08-04.", [])
+    # Today's date comes from the system prompt itself.
+    v = _review("Today is 2026-08-04.", [])
     assert v.ok
 
 
@@ -401,7 +401,7 @@ def test_one_correction_names_every_problem_at_once() -> None:
 
 def test_ordinary_words_are_not_mistaken_for_tool_names() -> None:
     """`members` is a tool name AND plain English, so it must stay speakable."""
-    assert _review("All 29 members have paid their tickets.", [ENV_FUND]).ok
+    assert _review("All 3 members have paid their tickets.", [ENV_FUND]).ok
     assert _review("Two members still owe money.", [ENV_FUND]).ok
 
 

@@ -67,6 +67,7 @@ class ToolStep:
     status: str
     message: str = ""
     reason: str = ""
+    summary: str = ""
 
 
 @dataclass
@@ -298,8 +299,11 @@ def run_turn(
                 if isinstance(result.get("token"), str):
                     offered_tokens.append(result["token"])
                 status = "ok" if result.get("ok") else "refused"
-                yield ToolStep(tc.name, status, str(result.get("message", "")),
-                               reason=outcome.reason or "")
+                yield ToolStep(
+                    tc.name, status, str(result.get("message", "")),
+                    reason=outcome.reason or "",
+                    summary=str(result.get("summary") or ""),
+                )
 
             history.append({
                 "role": "tool",

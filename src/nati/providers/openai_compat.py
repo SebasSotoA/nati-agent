@@ -1,9 +1,8 @@
 """The only network code in the project.
 
-Talks to AWS Bedrock through its OpenAI Chat Completions-compatible endpoint
-(bedrock-mantle), authenticated with a Bedrock key. That avoids boto3, SigV4 and
-the Converse dialect — and with it, Converse's `reasoningContent` signature
-replay rules, which are an entire class of bug we do not want.
+Talks to Ollama Cloud through its OpenAI Chat Completions-compatible endpoint,
+authenticated with a Bearer API key. The `openai` client is pointed at
+`base_url`; there is no extra SDK.
 
 The contract with the rest of the program: `complete()` returns a RawTurn
 carrying the response envelope VERBATIM. The loop persists that envelope before
@@ -244,22 +243,22 @@ def _http_message(exc: APIStatusError, profile: Profile) -> str:
     detail = str(exc)
     if code in (401, 403):
         return (
-            f"Bedrock rejected the key (HTTP {code}).\n"
+            f"Ollama rejected the key (HTTP {code}).\n"
             "  Check NATI_API_KEY: it may be expired, or lack permission\n"
-            f"  for {profile.model} in {profile.region}.\n"
+            f"  for {profile.model}.\n"
             f"  Detail: {detail}"
         )
     if code == 404:
         return (
-            f"Bedrock cannot find the model '{profile.model}' (HTTP 404).\n"
-            f"  Check the id, and that it exists in region {profile.region}.\n"
+            f"Ollama cannot find the model '{profile.model}' (HTTP 404).\n"
+            "  Check the id in profiles.toml (or NATI_MODEL).\n"
             f"  Detail: {detail}"
         )
     if code == 400:
         return (
-            f"Bedrock rejected the request (HTTP 400).\n"
+            f"Ollama rejected the request (HTTP 400).\n"
             "  Common causes: a tool's parameters are not a JSON object, or a\n"
             "  tool returned empty content (some models reject that).\n"
             f"  Detail: {detail}"
         )
-    return f"Bedrock responded HTTP {code}.\n  Detail: {detail}"
+    return f"Ollama responded HTTP {code}.\n  Detail: {detail}"

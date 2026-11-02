@@ -205,11 +205,18 @@ def date_not_future(value: object, field: str = "date") -> str:
     return iso
 
 
-def date_in_cycle(value: object, cycle_year: int, field: str = "date") -> str:
-    """Inside the cycle (January to November of the current year) and not future.
+def date_in_cycle(
+    value: object,
+    cycle_year: int,
+    field: str = "date",
+    first_month: int = 1,
+    last_month: int = 11,
+) -> str:
+    """Inside the cycle (first_month to last_month of the current year) and not future.
 
     Without the lower bound, a saving dated 2025 would be added into the 2026
-    payout, and next cycle the whole of 2026 would be counted again.
+    payout, and next cycle the whole of 2026 would be counted again. Months
+    come from settings (default January–November).
     """
     iso = date_not_future(value, field)
     parsed = date.fromisoformat(iso)
@@ -217,22 +224,35 @@ def date_in_cycle(value: object, cycle_year: int, field: str = "date") -> str:
         raise Refusal(
             "outside_cycle", f"That date is not part of the {cycle_year} cycle."
         )
-    if parsed.month > 11:
+    if not first_month <= parsed.month <= last_month:
+        if last_month == 11 and parsed.month > 11:
+            raise Refusal(
+                "december_excluded",
+                "December is not part of the cycle: the savings exist to be spent in "
+                "December, so the cycle closes at the end of November.",
+            )
         raise Refusal(
-            "december_excluded",
-            "December is not part of the cycle: the savings exist to be spent in "
-            "December, so the cycle closes at the end of November.",
+            "outside_cycle",
+            f"That date is not part of the {cycle_year} cycle "
+            f"(months {first_month} to {last_month}).",
         )
     return iso
 
 
-def cycle_month(value: object) -> int:
+def cycle_month(
+    value: object, first_month: int = 1, last_month: int = 11
+) -> int:
     n = integer(value, "month")
-    if not 1 <= n <= 11:
+    if not first_month <= n <= last_month:
+        if last_month == 11 and not 1 <= n <= 11:
+            raise Refusal(
+                "month_outside_cycle",
+                "The cycle runs from January (1) to November (11). December does not "
+                "count.",
+            )
         raise Refusal(
             "month_outside_cycle",
-            "The cycle runs from January (1) to November (11). December does not "
-            "count.",
+            f"The cycle runs from month {first_month} to month {last_month}.",
         )
     return n
 

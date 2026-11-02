@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates src/nati/world/seed.sql — the synthetic world of the natillera.
+"""Generates tests/fixtures/challenge_world.sql — the synthetic challenge world.
 
 Why a generator instead of hand-written SQL: with 29 members and 11 months of
 raffles the seed is past 500 rows. At that size hand-written SQL stops being
@@ -13,7 +13,9 @@ byte, every time:
   - no clocks and no "today"
   - fixed name lists, in a fixed order
 tests/test_seed.py generates twice and compares, and checks the committed
-seed.sql still matches this generator.
+fixture still matches this generator.
+
+Production books start from src/nati/world/bootstrap.sql, not this file.
 
 Usage:  uv run python scripts/generate_seed.py [--out FILE] [--check]
 """
@@ -28,7 +30,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT = ROOT / "src" / "nati" / "world" / "seed.sql"
+DEFAULT_OUT = ROOT / "tests" / "fixtures" / "challenge_world.sql"
 
 SEED = 20260804  # fixed on purpose: changing it changes the entire world
 

@@ -265,7 +265,7 @@ def test_the_audit_keeps_the_raw_arguments(con: sqlite3.Connection) -> None:
 def test_marking_a_ticket_paid_cannot_touch_its_numbers(
     con: sqlite3.Connection, ctx: Ctx
 ) -> None:
-    """The allowlist lives at the chokepoint, not in 19 disciplined tools."""
+    """The allowlist lives at the chokepoint, not in 21 disciplined tools."""
     unpaid = con.execute(
         "SELECT id FROM raffle_tickets WHERE paid = 0 LIMIT 1"
     ).fetchone()
@@ -286,12 +286,11 @@ def test_ids_are_not_assigned_by_hand(con: sqlite3.Connection, ctx: Ctx) -> None
                {"id": -5, "member_id": 1, "date": TODAY, "amount": 100}, ctx)
 
 
-def test_lenders_are_never_written_by_a_tool(
+def test_lenders_cannot_be_updated(
     con: sqlite3.Connection, ctx: Ctx
 ) -> None:
     with pytest.raises(db.ProgrammingError):
-        insert(con, "lenders",
-               {"name": "Other", "kind": "personal", "member_id": 2}, ctx)
+        update(con, "lenders", 1, {"name": "Other"}, ctx)
 
 
 # --------------------------------------------------------------------------

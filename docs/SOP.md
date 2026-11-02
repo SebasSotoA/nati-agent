@@ -166,7 +166,10 @@ not suggest paying anyway or taking the shortfall from elsewhere. **SOFT**
 ## F. Records and audit
 
 **F1** — Nothing is ever deleted. Not a member, a saving, a loan, a payment, an interest
-charge, a ticket, a draw, or a configuration value. **HARD**
+charge, a ticket, a draw, or a configuration value. **HARD**, with one exception:
+`reset_cycle` archives the current year's money rows into `cycle_archives` first, then
+deletes those year-scoped rows. Members, lenders, settings, and the audit log are never
+deleted.
 
 **F2** — Recorded movements are never edited. A mistake is corrected by recording an
 opposite movement, leaving both visible. **HARD**
@@ -529,11 +532,19 @@ browser, which is not the model.
 
 ## 11. Scope and honest limits
 
-This SOP covers Nati's behavior. It does not cover:
+This SOP covers Nati's behavior. Multi-year operation is defined:
 
-- **Anything outside the current cycle.** Multi-year behavior is undefined.
+- **`start_cycle`** opens the next cycle year. Members carry forward. The year only
+  moves forward. New members may join once the new year has no money moving yet
+  (the same `add_member` rule, scoped to the current year).
+- **`reset_cycle`** is the only F1 delete exception: it archives the current year's
+  savings, loans, tickets and draws, then removes those rows. Members and lenders
+  stay.
+
+It does not cover:
+
 - **Members leaving mid-cycle.** By the administrator's rule, nobody joins after the
-  cycle starts, and nobody has left. Untested.
+  cycle starts moving money, and nobody has left. Untested.
 - **The exact distribution date**, and whether outstanding loans are collected first. Open
   question. The world currently shows the tension: cash falls short of a full payout
   because money is out on loan.

@@ -1,0 +1,34 @@
+# Fly.io: one always-on machine, SQLite on a volume, webhook-only.
+# Do not enable Managed Postgres. Create the volume once:
+#   fly volumes create nati_data --region iad --size 5
+#
+# Secrets (not in this file):
+#   fly secrets set OLLAMA_API_KEY=... NATI_MODEL=...
+#   fly secrets set NATI_ADMIN_PHONE=... WHATSAPP_TOKEN=... \
+#     WHATSAPP_PHONE_NUMBER_ID=... WHATSAPP_APP_SECRET=... WHATSAPP_VERIFY_TOKEN=...
+
+app = "nati-agent"
+primary_region = "iad"
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "nati_data"
+  destination = "/data"
+
+[env]
+  NATI_PUBLIC_CHAT = "0"
+  NATI_DATA_DIR = "/data"

@@ -71,9 +71,9 @@ def test_every_tool_has_a_valid_schema() -> None:
         assert isinstance(fn["description"], str) and fn["description"]
 
 
-def test_there_are_nineteen_tools() -> None:
-    assert len(registry.TOOLS) == 19
-    assert sum(1 for t in registry.TOOLS if t.writes) == 11
+def test_there_are_twenty_one_tools() -> None:
+    assert len(registry.TOOLS) == 21
+    assert sum(1 for t in registry.TOOLS if t.writes) == 13
 
 
 def test_the_schema_hash_is_stable() -> None:

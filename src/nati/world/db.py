@@ -8,7 +8,7 @@ Four invariants hold everything else up:
    `audit_log` carrying the trace's conv_id and turn number. A careless tool
    cannot skip the audit because there is no other way to write.
 3. Each operation may only write the columns that belong to it
-   (ALLOWED_COLUMNS). Enforcement lives at the chokepoint, not in 19 separate
+   (ALLOWED_COLUMNS). Enforcement lives at the chokepoint, not in 21 separate
    call sites that somebody has to remember.
 4. EVERY attempt is recorded, including refused ones. A session that hits
    fifteen gates must leave fifteen rows of evidence: in this exercise, the
@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -39,6 +41,7 @@ TABLES = (
     "loan_interest",
     "raffle_tickets",
     "draws",
+    "cycle_archives",
 )
 
 # Which columns each operation may touch, keyed by (table, operation).
@@ -73,7 +76,9 @@ ALLOWED_COLUMNS: dict[tuple[str, str], frozenset[str]] = {
         {"kind", "month", "year", "winning_number", "prize", "date"}
     ),
     ("settings", "insert"): frozenset({"key", "value", "effective_from", "note"}),
-    # `lenders` is never written by a tool: it comes from the seed.
+    # Bootstrapping the administrator writes her personal lender. No chat tool
+    # exposes this; cycle_archives and _cycle_reset_guard stay off the list.
+    ("lenders", "insert"): frozenset({"name", "kind", "member_id"}),
 }
 
 
@@ -159,10 +164,19 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     return con
 
 
-def create(path: Path | None = None, *, reset: bool = False) -> Path:
-    """Build the world from schema.sql + seed.sql. Always reproducible."""
+def create(
+    path: Path | None = None, *, reset: bool = False, seed: str | None = None
+) -> Path:
+    """Build the world from schema.sql + a seed. Always reproducible.
+
+    `seed` is `"prod"` (empty books, bootstrap.sql) or `"challenge"` (the
+    29-member fixture). Omit it to take NATI_SEED, defaulting to prod. Tests
+    set NATI_SEED=challenge in conftest.py; `nati seed --reset` passes prod.
+    """
     path = path or config.DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
+    kind = (seed or os.environ.get("NATI_SEED", "prod")).strip() or "prod"
+    sql_path = _seed_sql(kind)
 
     if path.exists():
         if not reset:
@@ -175,11 +189,238 @@ def create(path: Path | None = None, *, reset: bool = False) -> Path:
     try:
         con.execute("PRAGMA foreign_keys = ON")
         con.executescript(config.SCHEMA_SQL.read_text(encoding="utf-8"))
-        con.executescript(config.SEED_SQL.read_text(encoding="utf-8"))
+        con.executescript(sql_path.read_text(encoding="utf-8"))
+        if kind == "prod":
+            _overlay_prod_settings(con)
         con.commit()
     finally:
         con.close()
     return path
+
+
+def _seed_sql(kind: str) -> Path:
+    if kind == "prod":
+        path = getattr(config, "BOOTSTRAP_SQL", None) or config.SEED_SQL
+        return Path(path)
+    if kind == "challenge":
+        path = getattr(config, "CHALLENGE_SEED_SQL", None)
+        if path is None:
+            path = config.ROOT / "tests" / "fixtures" / "challenge_world.sql"
+        return Path(path)
+    raise WorldError(
+        "I do not know that kind of world. It has to be prod or challenge."
+    )
+
+
+def _overlay_prod_settings(con: sqlite3.Connection) -> None:
+    """Stamp cycle_year from the clock. Settings cannot be UPDATEd."""
+    year = clock.today().year
+    effective = f"{year:04d}-01-01"
+    rows = (
+        ("cycle_year", str(year), "cycle year from clock at create"),
+        ("cycle_first_month", "1", "January"),
+        ("cycle_last_month", "11", "November; December is for the shopping"),
+        ("monthly_ticket_price", "10", "Monthly raffle fee per member"),
+        ("monthly_prize", "60", "Fixed prize for the monthly raffle"),
+        ("quarterly_ticket_price", "20", "Quarterly fee per member"),
+        ("quarterly_prize", "250", "Prize for the quarterly raffle"),
+    )
+    con.executemany(
+        """INSERT INTO settings (key, value, effective_from, note)
+           VALUES (?, ?, ?, ?)""",
+        [(key, value, effective, note) for key, value, note in rows],
+    )
+
+
+_PHONE = re.compile(r"^\d{10}$")
+
+
+def bootstrap_admin(
+    con: sqlite3.Connection,
+    name: str,
+    phone: str,
+    ctx: Ctx | None = None,
+) -> dict[str, int]:
+    """First member of a production world: the administrator and her lender."""
+    ctx = ctx or Ctx(tool="bootstrap", actor="admin")
+    cleaned_name = " ".join(name.split())
+    cleaned_phone = phone.replace(" ", "")
+    if not cleaned_name:
+        raise WorldError("A name is required.")
+    if not _PHONE.fullmatch(cleaned_phone):
+        raise WorldError("The phone number has to be exactly 10 digits.")
+    if con.execute("SELECT COUNT(*) FROM members").fetchone()[0]:
+        raise WorldError(
+            "This world already has members. Bootstrap is only for the first "
+            "administrator."
+        )
+    if con.execute("SELECT 1 FROM lenders WHERE kind = 'personal'").fetchone():
+        raise WorldError("A personal lender is already set up.")
+
+    with transaction(con):
+        member = insert(
+            con,
+            "members",
+            {
+                "name": cleaned_name,
+                "phone": cleaned_phone,
+                "joined_on": clock.today_iso(),
+            },
+            ctx,
+        )
+        insert(
+            con,
+            "settings",
+            {
+                "key": "admin_member_id",
+                "value": str(member["id"]),
+                "effective_from": clock.today_iso(),
+                "note": "administrator bootstrapped",
+            },
+            ctx,
+        )
+        lender = insert(
+            con,
+            "lenders",
+            {
+                "name": f"{cleaned_name} (personal)",
+                "kind": "personal",
+                "member_id": member["id"],
+            },
+            ctx,
+        )
+    return {
+        "member_id": member["id"],
+        "lender_id": lender["id"],
+        "audit_id": member["audit_id"],
+    }
+
+
+def reset_cycle_year(
+    con: sqlite3.Connection, year: int, ctx: Ctx
+) -> dict[str, Any]:
+    """Archive then delete year-scoped money rows. Members and lenders stay.
+
+    The only F1 delete exception. The guard is raised for this transaction
+    alone; a failure rolls back, including the guard.
+    """
+    y = f"{year:04d}"
+
+    def rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        return [dict(r) for r in con.execute(sql, params)]
+
+    try:
+        with transaction(con):
+            con.execute("UPDATE _cycle_reset_guard SET allow = 1 WHERE id = 1")
+
+            savings = rows(
+                "SELECT * FROM savings WHERE substr(date, 1, 4) = ? ORDER BY id",
+                (y,),
+            )
+            loans = rows(
+                "SELECT * FROM loans WHERE substr(started_on, 1, 4) = ? "
+                "ORDER BY id",
+                (y,),
+            )
+            loan_ids = [int(r["id"]) for r in loans]
+            if loan_ids:
+                marks = ",".join("?" for _ in loan_ids)
+                payments = rows(
+                    f"SELECT * FROM loan_payments WHERE loan_id IN ({marks}) "
+                    "ORDER BY id",  # noqa: S608
+                    tuple(loan_ids),
+                )
+                interest = rows(
+                    f"SELECT * FROM loan_interest WHERE loan_id IN ({marks}) "
+                    "ORDER BY id",  # noqa: S608
+                    tuple(loan_ids),
+                )
+            else:
+                payments, interest = [], []
+            tickets = rows(
+                "SELECT * FROM raffle_tickets WHERE year = ? ORDER BY id",
+                (year,),
+            )
+            draws = rows(
+                "SELECT * FROM draws WHERE year = ? ORDER BY id", (year,)
+            )
+
+            snapshot = json.dumps(
+                {
+                    "cycle_year": year,
+                    "draws": draws,
+                    "loan_interest": interest,
+                    "loan_payments": payments,
+                    "loans": loans,
+                    "raffle_tickets": tickets,
+                    "savings": savings,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            cur = con.execute(
+                """INSERT INTO cycle_archives
+                     (cycle_year, archived_on, conv_id, snapshot, note)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    year,
+                    clock.today_iso(),
+                    ctx.conv_id,
+                    snapshot,
+                    "cycle reset via chat",
+                ),
+            )
+            archive_id = int(cur.lastrowid)
+
+            if loan_ids:
+                marks = ",".join("?" for _ in loan_ids)
+                con.execute(
+                    f"DELETE FROM loan_payments WHERE loan_id IN ({marks})",  # noqa: S608
+                    loan_ids,
+                )
+                con.execute(
+                    f"DELETE FROM loan_interest WHERE loan_id IN ({marks})",  # noqa: S608
+                    loan_ids,
+                )
+            con.execute(
+                "DELETE FROM savings WHERE substr(date, 1, 4) = ? "
+                "AND reversal_of IS NOT NULL",
+                (y,),
+            )
+            con.execute(
+                "DELETE FROM savings WHERE substr(date, 1, 4) = ?", (y,)
+            )
+            con.execute("DELETE FROM raffle_tickets WHERE year = ?", (year,))
+            con.execute("DELETE FROM draws WHERE year = ?", (year,))
+            if loan_ids:
+                marks = ",".join("?" for _ in loan_ids)
+                con.execute(
+                    f"DELETE FROM loans WHERE id IN ({marks})",  # noqa: S608
+                    loan_ids,
+                )
+
+            con.execute("UPDATE _cycle_reset_guard SET allow = 0 WHERE id = 1")
+            _audit(
+                con,
+                ctx,
+                table="cycle_archives",
+                pk=archive_id,
+                before=None,
+                after={"id": archive_id, "cycle_year": year},
+            )
+    except sqlite3.Error as exc:
+        raise WorldError(
+            "I could not archive that cycle, so nothing was removed."
+        ) from exc
+
+    return {
+        "archive_id": archive_id,
+        "year": year,
+        "savings": len(savings),
+        "loans": len(loans),
+        "tickets": len(tickets),
+        "draws": len(draws),
+    }
 
 
 @contextmanager

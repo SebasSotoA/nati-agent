@@ -22,7 +22,8 @@
 
 -- =========================================
 -- MEMBERS  (was: usuarios)
--- 29 people. Nobody joins once the cycle has started.
+-- Production starts empty. People are added with add_member / nati bootstrap.
+-- Nobody joins once the current cycle has money moving.
 -- =========================================
 CREATE TABLE members (
   id        INTEGER PRIMARY KEY,
@@ -373,32 +374,76 @@ CREATE TRIGGER audit_log_no_delete
 BEFORE DELETE ON audit_log
 BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
 
+-- =========================================
+-- CYCLE_ARCHIVES  (added — F1's only delete exception)
+-- Year-scoped money rows, snapshotted as JSON before reset_cycle deletes them.
+-- Members, lenders, settings and the audit log are never archived-and-removed.
+-- =========================================
+CREATE TABLE cycle_archives (
+  id          INTEGER PRIMARY KEY,
+  cycle_year  INTEGER NOT NULL,
+  archived_on TEXT    NOT NULL,
+  conv_id     TEXT,
+  snapshot    TEXT    NOT NULL,
+  note        TEXT
+);
+
+CREATE TRIGGER cycle_archives_no_update
+BEFORE UPDATE ON cycle_archives
+BEGIN SELECT RAISE(ABORT, 'A cycle archive is not edited.'); END;
+
+CREATE TRIGGER cycle_archives_no_delete
+BEFORE DELETE ON cycle_archives
+BEGIN SELECT RAISE(ABORT, 'A cycle archive is not deleted.'); END;
+
+-- =========================================
+-- _CYCLE_RESET_GUARD  (internal — tools cannot write this table)
+-- DELETE of year-scoped money rows is allowed only while allow = 1, and only
+-- from db.reset_cycle_year, which sets it for the duration of one transaction.
+-- =========================================
+CREATE TABLE _cycle_reset_guard (
+  id    INTEGER PRIMARY KEY CHECK (id = 1),
+  allow INTEGER NOT NULL DEFAULT 0 CHECK (allow IN (0, 1))
+);
+INSERT INTO _cycle_reset_guard (id, allow) VALUES (1, 0);
+
+CREATE TRIGGER cycle_reset_guard_no_delete
+BEFORE DELETE ON _cycle_reset_guard
+BEGIN SELECT RAISE(ABORT, 'The cycle-reset guard is not deleted.'); END;
+
 -- =====================================================================
 -- NOTHING IS EVER DELETED
 -- The doctrine of this database is "reversing entries, never erasures": a
 -- mistake is corrected by recording an opposite movement, leaving both rows
--- visible. Only audit_log used to enforce it; now no table accepts a DELETE,
--- from a tool or from raw SQL.
+-- visible. Members, lenders, settings, the audit log, cycle archives and the
+-- reset guard never accept a DELETE. Year-scoped money rows may be deleted
+-- only while `_cycle_reset_guard.allow = 1` (reset_cycle, after archiving).
 -- =====================================================================
 CREATE TRIGGER members_no_delete BEFORE DELETE ON members
 BEGIN SELECT RAISE(ABORT, 'Members are not deleted: the natillera keeps its history.'); END;
 
 CREATE TRIGGER savings_no_delete BEFORE DELETE ON savings
+WHEN (SELECT allow FROM _cycle_reset_guard WHERE id = 1) IS NOT 1
 BEGIN SELECT RAISE(ABORT, 'A saving is not deleted: correct it with an opposite entry.'); END;
 
 CREATE TRIGGER loans_no_delete BEFORE DELETE ON loans
+WHEN (SELECT allow FROM _cycle_reset_guard WHERE id = 1) IS NOT 1
 BEGIN SELECT RAISE(ABORT, 'A loan is not deleted: it is voided and the trail remains.'); END;
 
 CREATE TRIGGER payments_no_delete BEFORE DELETE ON loan_payments
+WHEN (SELECT allow FROM _cycle_reset_guard WHERE id = 1) IS NOT 1
 BEGIN SELECT RAISE(ABORT, 'A payment is not deleted: correct it with an opposite entry.'); END;
 
 CREATE TRIGGER interest_no_delete BEFORE DELETE ON loan_interest
+WHEN (SELECT allow FROM _cycle_reset_guard WHERE id = 1) IS NOT 1
 BEGIN SELECT RAISE(ABORT, 'Accrued interest is not deleted.'); END;
 
 CREATE TRIGGER tickets_no_delete BEFORE DELETE ON raffle_tickets
+WHEN (SELECT allow FROM _cycle_reset_guard WHERE id = 1) IS NOT 1
 BEGIN SELECT RAISE(ABORT, 'A raffle ticket is not deleted.'); END;
 
 CREATE TRIGGER draws_no_delete BEFORE DELETE ON draws
+WHEN (SELECT allow FROM _cycle_reset_guard WHERE id = 1) IS NOT 1
 BEGIN SELECT RAISE(ABORT, 'A draw is not deleted.'); END;
 
 CREATE TRIGGER settings_no_delete BEFORE DELETE ON settings

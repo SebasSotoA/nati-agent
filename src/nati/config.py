@@ -1,4 +1,4 @@
-"""Configuration: model profiles, paths, and the Bedrock key.
+"""Configuration: model profiles, paths, and the Ollama API key.
 
 The key is read from the environment or from a local `.env` file, which is in
 .gitignore. NEVER from the repo: it is a spend-capable credential and this repo
@@ -23,13 +23,32 @@ VAR_DIR = ROOT / "var"
 TRACES_DIR = ROOT / "traces"
 DB_PATH = VAR_DIR / "world.db"
 SCHEMA_SQL = ROOT / "src" / "nati" / "world" / "schema.sql"
-SEED_SQL = ROOT / "src" / "nati" / "world" / "seed.sql"
+BOOTSTRAP_SQL = ROOT / "src" / "nati" / "world" / "bootstrap.sql"
+CHALLENGE_SEED_SQL = ROOT / "tests" / "fixtures" / "challenge_world.sql"
+SEED_SQL = BOOTSTRAP_SQL
 
 # The synthetic world's "today". Fixed so runs are reproducible: the 2026 cycle
 # is seeded through August 4th.
 WORLD_TODAY = "2026-08-04"
 
-_KEY_ENV_VARS = ("NATI_API_KEY", "AWS_BEARER_TOKEN_BEDROCK")
+_KEY_ENV_VARS = ("NATI_API_KEY", "OLLAMA_API_KEY")
+
+
+def refresh_paths() -> None:
+    """Recompute VAR_DIR / DB_PATH / TRACES_DIR from NATI_DATA_DIR.
+
+    Fly mounts a volume at /data. Local runs keep the repo `var/` and `traces/`.
+    """
+    global VAR_DIR, DB_PATH, TRACES_DIR
+    raw = os.environ.get("NATI_DATA_DIR", "").strip()
+    if raw:
+        VAR_DIR = Path(raw)
+        DB_PATH = VAR_DIR / "world.db"
+        TRACES_DIR = VAR_DIR / "traces"
+    else:
+        VAR_DIR = ROOT / "var"
+        DB_PATH = VAR_DIR / "world.db"
+        TRACES_DIR = ROOT / "traces"
 
 
 class ConfigError(Exception):
@@ -45,6 +64,7 @@ def load_dotenv(path: Path | None = None) -> list[str]:
     """
     path = path or ENV_FILE
     if not path.exists():
+        refresh_paths()
         return []
 
     loaded: list[str] = []
@@ -65,6 +85,7 @@ def load_dotenv(path: Path | None = None) -> list[str]:
             continue
         os.environ[key] = value
         loaded.append(key)
+    refresh_paths()
     return loaded
 
 
@@ -134,7 +155,7 @@ def load_profile(name: str | None = None) -> Profile:
         )
 
     p = profiles[name]
-    missing = [k for k in ("model", "base_url", "region") if k not in p]
+    missing = [k for k in ("model", "base_url") if k not in p]
     if missing:
         raise ConfigError(
             f"Profile '{name}' is incomplete; missing: {', '.join(missing)}"
@@ -147,7 +168,7 @@ def load_profile(name: str | None = None) -> Profile:
         name=name,
         model=model,
         base_url=p["base_url"],
-        region=p["region"],
+        region=p.get("region", ""),
         max_tokens=int(p.get("max_tokens", 4096)),
         # Some reasoning models only return their Chain of Thought when it is
         # explicitly requested; others ignore this field. Empty means "do not
@@ -166,14 +187,15 @@ def model_override() -> str | None:
 
 
 def api_key() -> str:
-    """The Bedrock key, from the environment or .env. Fails with instructions."""
+    """The Ollama API key, from the environment or .env. Fails with instructions."""
     load_dotenv()
     for var in _KEY_ENV_VARS:
         value = os.environ.get(var, "").strip()
         if value:
             return value
     raise ConfigError(
-        "The Bedrock key is missing.\n"
+        "The Ollama API key is missing.\n"
+        "  Put it in .env as NATI_API_KEY or OLLAMA_API_KEY.\n"
         "  Option 1:  cp .env.example .env   and paste the key inside\n"
         "  Option 2:  export NATI_API_KEY=<the team's key>\n"
         f"  (I also accept {_KEY_ENV_VARS[1]})"
@@ -195,8 +217,7 @@ def key_source() -> str:
 def operator() -> str:
     """Who is running the agent. Recorded in every trace.
 
-    Two purposes: attributing a finding to whoever found it, and tracing Bedrock
-    spend (the key is shared by the whole team).
+    Attributing a finding to whoever found it.
     """
     load_dotenv()
     return os.environ.get("NATI_USER", "").strip() or "anonymous"

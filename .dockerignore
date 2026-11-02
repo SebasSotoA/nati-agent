@@ -1,0 +1,16 @@
+.venv
+.git
+.pytest_cache
+__pycache__
+*.pyc
+var
+traces
+.env
+tests
+docs
+sealed
+scripts
+*.md
+!README.md
+.cursor
+agent-transcripts
